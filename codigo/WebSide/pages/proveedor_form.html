@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title id="titulo-tab">Proyecto 1 - Bases de Datos 2</title>
+  <link rel="stylesheet" href="../css/styles.css">
+</head>
+<body>
+  <nav class="navbar">
+    <a href="../index.html">Inicio</a>
+    <a href="proveedores.html">Proveedores</a>
+  </nav>
+
+  <main>
+    <h1 id="titulo">Nuevo proveedor</h1>
+    <p>Los campos con * son obligatorios.</p>
+
+    <form id="form-proveedor" class="formulario ancho">
+      <h2>Información general</h2>
+      <label>Nombre *
+        <input type="text" id="nombre" maxlength="100" required>
+      </label>
+      <div class="dos-columnas">
+        <label>Código del proveedor
+          <input type="text" id="referencia" maxlength="20">
+        </label>
+        <label>Categoría *
+          <select id="categoria" required></select>
+        </label>
+        <label>Método de entrega
+          <select id="metodo"></select>
+        </label>
+        <label>Días de gracia para pago *
+          <input type="number" id="diasPago" min="0" step="1" value="30" required>
+        </label>
+      </div>
+
+      <h2>Contacto</h2>
+      <div class="dos-columnas">
+        <label>Contacto primario *
+          <select id="contacto" required></select>
+        </label>
+        <label>Contacto alterno *
+          <select id="contactoAlterno" required></select>
+        </label>
+        <label>Teléfono *
+          <input type="text" id="telefono" maxlength="20" required>
+        </label>
+        <label>Fax *
+          <input type="text" id="fax" maxlength="20" required>
+        </label>
+      </div>
+      <label>Sitio web *
+        <input type="url" id="sitioWeb" maxlength="256" placeholder="http://www.ejemplo.com" required>
+      </label>
+
+      <h2>Dirección de entrega</h2>
+      <label>Dirección línea 1 *
+        <input type="text" id="direccionEntrega1" maxlength="60" required>
+      </label>
+      <label>Dirección línea 2
+        <input type="text" id="direccionEntrega2" maxlength="60">
+      </label>
+      <div class="dos-columnas">
+        <label>Ciudad *
+          <select id="ciudad" required></select>
+        </label>
+        <label>Código postal *
+          <input type="text" id="codigoPostal" maxlength="10" required>
+        </label>
+      </div>
+
+      <h2>Dirección postal</h2>
+      <label>Dirección línea 1 *
+        <input type="text" id="direccionPostal1" maxlength="60" required>
+      </label>
+      <label>Dirección línea 2
+        <input type="text" id="direccionPostal2" maxlength="60">
+      </label>
+
+      <h2>Información bancaria</h2>
+      <div class="dos-columnas">
+        <label>Nombre del banco
+          <input type="text" id="nombreBanco" maxlength="50">
+        </label>
+        <label>Número de cuenta corriente
+          <input type="text" id="numeroCuenta" maxlength="20">
+        </label>
+      </div>
+
+      <h2>Ubicación</h2>
+      <p class="ayuda">Indica la latitud y la longitud juntas, o deja ambas vacías.</p>
+      <div class="dos-columnas">
+        <label>Latitud
+          <input type="number" id="latitud" min="-90" max="90" step="any">
+        </label>
+        <label>Longitud
+          <input type="number" id="longitud" min="-180" max="180" step="any">
+        </label>
+      </div>
+
+      <button type="submit" id="btn-guardar">Guardar</button>
+    </form>
+
+    <p id="error" style="color: red;"></p>
+  </main>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/proveedor_form.js"></script>
+</script>
+</body>
+</html>

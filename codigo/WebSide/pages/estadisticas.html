@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Estadísticas</title>
+  <link rel="stylesheet" href="../css/styles.css">
+</head>
+<body>
+  <nav class="navbar">
+    <a href="../index.html">Inicio</a>
+    <a href="estadisticas.html" class="activo">Estadísticas</a>
+  </nav>
+
+  <main class="estadisticas-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar-estadisticas">
+      <h2>Reportes</h2>
+      <nav id="lista-reportes">
+        <button class="reporte-btn activo" data-reporte="1">
+          <span class="reporte-num">01</span>
+          <span class="reporte-nombre">Compras por proveedor</span>
+        </button>
+        <button class="reporte-btn" data-reporte="2">
+          <span class="reporte-num">02</span>
+          <span class="reporte-nombre">Ventas por cliente</span>
+        </button>
+        <button class="reporte-btn" data-reporte="3">
+          <span class="reporte-num">03</span>
+          <span class="reporte-nombre">Top 5 productos</span>
+        </button>
+        <button class="reporte-btn" data-reporte="4">
+          <span class="reporte-num">04</span>
+          <span class="reporte-nombre">Top 5 clientes</span>
+        </button>
+        <button class="reporte-btn" data-reporte="5">
+          <span class="reporte-num">05</span>
+          <span class="reporte-nombre">Top 5 proveedores</span>
+        </button>
+        <button class="reporte-btn" data-reporte="6">
+          <span class="reporte-num">06</span>
+          <span class="reporte-nombre">Matriz de ventas</span>
+        </button>
+        <button class="reporte-btn" data-reporte="7">
+          <span class="reporte-num">07</span>
+          <span class="reporte-nombre">Seguimiento clientes</span>
+        </button>
+        <button class="reporte-btn" data-reporte="8">
+          <span class="reporte-num">08</span>
+          <span class="reporte-nombre">Seguimiento proveedores</span>
+        </button>
+        <button class="reporte-btn" data-reporte="9">
+          <span class="reporte-num">09</span>
+          <span class="reporte-nombre">Rotación de inventario</span>
+        </button>
+        <button class="reporte-btn" data-reporte="10">
+          <span class="reporte-num">10</span>
+          <span class="reporte-nombre">Método de envío favorito</span>
+        </button>
+      </nav>
+    </aside>
+
+    <!-- Contenido -->
+    <section class="contenido-estadisticas">
+
+      <!-- Reporte 1 -->
+      <div id="reporte-1" class="reporte-panel">
+        <h1>1. Montos de compras a proveedores</h1>
+        <p class="descripcion">Máximo, mínimo y promedio agrupados por categoría y proveedor.</p>
+        <div class="filtros">
+          <input type="text" id="r1-categoria" placeholder="Filtrar por categoría...">
+          <input type="text" id="r1-proveedor" placeholder="Filtrar por proveedor...">
+          <button id="r1-buscar">Buscar</button>
+          <button id="r1-limpiar" class="btn-secondary">Restaurar</button>
+        </div>
+        <div class="cargando" id="r1-cargando" hidden>Cargando...</div>
+        <div class="tabla-wrapper"><table id="r1-tabla" hidden><thead></thead><tbody></tbody></table></div>
+        <div class="paginacion" id="r1-paginacion" hidden>
+          <button id="r1-prev" class="btn-secondary">← Anterior</button>
+          <span id="r1-pagina-info"></span>
+          <button id="r1-next" class="btn-secondary">Siguiente →</button>
+        </div>
+        <pre id="r1-error" class="error-msg"></pre>
+      </div>
+
+      <!-- Reporte 2 -->
+      <div id="reporte-2" class="reporte-panel" hidden>
+        <h1>2. Montos de ventas a clientes</h1>
+        <p class="descripcion">Máximo, mínimo y promedio agrupados por categoría y cliente.</p>
+        <div class="filtros">
+          <input type="text" id="r2-categoria" placeholder="Filtrar por categoría...">
+          <input type="text" id="r2-cliente" placeholder="Filtrar por cliente...">
+          <button id="r2-buscar">Buscar</button>
+          <button id="r2-limpiar" class="btn-secondary">Limpiar</button>
+        </div>
+        <div class="cargando" id="r2-cargando" hidden>Cargando...</div>
+        <div class="tabla-wrapper"><table id="r2-tabla" hidden><thead></thead><tbody></tbody></table></div>
+        <div class="paginacion" id="r2-paginacion" hidden>
+          <button id="r2-prev" class="btn-secondary">← Anterior</button>
+          <span id="r2-pagina-info"></span>
+          <button id="r2-next" class="btn-secondary">Siguiente →</button>
+        </div>
+        <pre id="r2-error" class="error-msg"></pre>
+      </div>
+
+      <!-- Reporte 3 -->
+      <div id="reporte-3" class="reporte-panel" hidden>
+        <h1>3. Top 5 productos por ganancia anual</h1>
+        <p class="descripcion">Productos que generan más ganancia cada año.</p>
+        <div class="filtros">
+          <select id="r3-anio-desde"><option value="">Año desde...</option></select>
+          <select id="r3-anio-hasta"><option value="">Año hasta...</option></select>
+          <button id="r3-buscar">Buscar</button>
+          <button id="r3-limpiar" class="btn-secondary">Limpiar</button>
+        </div>
+        <div class="cargando" id="r3-cargando" hidden>Cargando...</div>
+        <div class="tabla-wrapper"><table id="r3-tabla" hidden><thead></thead><tbody></tbody></table></div>
+        <div class="paginacion" id="r3-paginacion" hidden>
+          <button id="r3-prev" class="btn-secondary">← Anterior</button>
+          <span id="r3-pagina-info"></span>
+          <button id="r3-next" class="btn-secondary">Siguiente →</button>
+        </div>
+        <pre id="r3-error" class="error-msg"></pre>
+      </div>
+
+      <!-- Reporte 4 -->
+      <div id="reporte-4" class="reporte-panel" hidden>
+        <h1>4. Top 5 clientes por facturas anuales</h1>
+        <p class="descripcion">Clientes con más facturas emitidas por año y monto total facturado.</p>
+        <div class="filtros">
+          <select id="r4-anio-desde"><option value="">Año desde...</option></select>
+          <select id="r4-anio-hasta"><option value="">Año hasta...</option></select>
+          <button id="r4-buscar">Buscar</button>
+          <button id="r4-limpiar" class="btn-secondary">Limpiar</button>
+        </div>
+        <div class="cargando" id="r4-cargando" hidden>Cargando...</div>
+        <div class="tabla-wrapper"><table id="r4-tabla" hidden><thead></thead><tbody></tbody></table></div>
+        <div class="paginacion" id="r4-paginacion" hidden>
+          <button id="r4-prev" class="btn-secondary">← Anterior</button>
+          <span id="r4-pagina-info"></span>
+          <button id="r4-next" class="btn-secondary">Siguiente →</button>
+        </div>
+        <pre id="r4-error" class="error-msg"></pre>
+      </div>
+
+      <!-- Reporte 5 -->
+      <div id="reporte-5" class="reporte-panel" hidden>
+        <h1>5. Top 5 proveedores por órdenes anuales</h1>
+        <p class="descripcion">Proveedores con más órdenes de compra emitidas por año y monto total.</p>
+        <div class="filtros">
+          <select id="r5-anio-desde"><option value="">Año desde...</option></select>
+          <select id="r5-anio-hasta"><option value="">Año hasta...</option></select>
+          <button id="r5-buscar">Buscar</button>
+          <button id="r5-limpiar" class="btn-secondary">Limpiar</button>
+        </div>
+        <div class="cargando" id="r5-cargando" hidden>Cargando...</div>
+        <div class="tabla-wrapper"><table id="r5-tabla" hidden><thead></thead><tbody></tbody></table></div>
+        <div class="paginacion" id="r5-paginacion" hidden>
+          <button id="r5-prev" class="btn-secondary">← Anterior</button>
+          <span id="r5-pagina-info"></span>
+          <button id="r5-next" class="btn-secondary">Siguiente →</button>
+        </div>
+        <pre id="r5-error" class="error-msg"></pre>
+      </div>
+
+      <!-- Reporte 6 -->
+      <div id="reporte-6" class="reporte-panel" hidden>
+        <h1>6. Matriz de ventas por categoría y año</h1>
+        <p class="descripcion">Ventas totales por categoría de producto desglosadas por año.</p>
+        <div class="filtros">
+          <button id="r6-buscar">Cargar matriz</button>
+        </div>
+        <div class="cargando" id="r6-cargando" hidden>Cargando...</div>
+        <div class="tabla-wrapper"><table id="r6-tabla" hidden><thead></thead><tbody></tbody></table></div>
+        <div class="paginacion" id="r6-paginacion" hidden>
+          <button id="r6-prev" class="btn-secondary">← Anterior</button>
+          <span id="r6-pagina-info"></span>
+          <button id="r6-next" class="btn-secondary">Siguiente →</button>
+        </div>
+        <pre id="r6-error" class="error-msg"></pre>
+      </div>
+
+      <!-- Reporte 7 -->
+      <div id="reporte-7" class="reporte-panel" hidden>
+        <h1>7. Seguimiento de compras de clientes</h1>
+        <p class="descripcion">Resumen mensual de compras por cliente.</p>
+        <div class="filtros">
+          <select id="r7-anio"><option value="">Todos los años</option></select>
+          <select id="r7-mes">
+            <option value="">Todos los meses</option>
+            <option value="1">Enero</option><option value="2">Febrero</option>
+            <option value="3">Marzo</option><option value="4">Abril</option>
+            <option value="5">Mayo</option><option value="6">Junio</option>
+            <option value="7">Julio</option><option value="8">Agosto</option>
+            <option value="9">Septiembre</option><option value="10">Octubre</option>
+            <option value="11">Noviembre</option><option value="12">Diciembre</option>
+          </select>
+          <select id="r7-grupo"><option value="">Todas las categorias</option></select>
+          <select id="r7-subgrupo"><option value="">Todas las subcategorias</option></select>
+          <button id="r7-buscar">Buscar</button>
+          <button id="r7-limpiar" class="btn-secondary">Limpiar</button>
+        </div>
+        <div class="cargando" id="r7-cargando" hidden>Cargando...</div>
+        <div class="tabla-wrapper"><table id="r7-tabla" hidden><thead></thead><tbody></tbody></table></div>
+        <div class="paginacion" id="r7-paginacion" hidden>
+          <button id="r7-prev" class="btn-secondary">← Anterior</button>
+          <span id="r7-pagina-info"></span>
+          <button id="r7-next" class="btn-secondary">Siguiente →</button>
+        </div>
+        <pre id="r7-error" class="error-msg"></pre>
+      </div>
+
+      <!-- Reporte 8 -->
+      <div id="reporte-8" class="reporte-panel" hidden>
+        <h1>8. Seguimiento de compras a proveedores</h1>
+        <p class="descripcion">Resumen mensual de compras por proveedor.</p>
+        <div class="filtros">
+          <select id="r8-anio"><option value="">Todos los años</option></select>
+          <select id="r8-mes">
+            <option value="">Todos los meses</option>
+            <option value="1">Enero</option><option value="2">Febrero</option>
+            <option value="3">Marzo</option><option value="4">Abril</option>
+            <option value="5">Mayo</option><option value="6">Junio</option>
+            <option value="7">Julio</option><option value="8">Agosto</option>
+            <option value="9">Septiembre</option><option value="10">Octubre</option>
+            <option value="11">Noviembre</option><option value="12">Diciembre</option>
+          </select>
+          <select id="r8-grupo"><option value="">Todas las categorias</option></select>
+          <select id="r8-subgrupo"><option value="">Todas las subcategorias</option></select>
+          <button id="r8-buscar">Buscar</button>
+          <button id="r8-limpiar" class="btn-secondary">Limpiar</button>
+        </div>
+        <div class="cargando" id="r8-cargando" hidden>Cargando...</div>
+        <div class="tabla-wrapper"><table id="r8-tabla" hidden><thead></thead><tbody></tbody></table></div>
+        <div class="paginacion" id="r8-paginacion" hidden>
+          <button id="r8-prev" class="btn-secondary">← Anterior</button>
+          <span id="r8-pagina-info"></span>
+          <button id="r8-next" class="btn-secondary">Siguiente →</button>
+        </div>
+        <pre id="r8-error" class="error-msg"></pre>
+      </div>
+
+      <!-- Reporte 9 -->
+      <div id="reporte-9" class="reporte-panel" hidden>
+        <h1>9. Rotación de inventario por producto</h1>
+        <p class="descripcion">Días promedio de rotación por producto.</p>
+        <div class="filtros">
+          <select id="r9-anio"><option value="">Todos los años</option></select>
+          <select id="r9-proveedor"><option value="">Todos los proveedores</option></select>
+          <select id="r9-grupo"><option value="">Todas las categorias</option></select>
+          <button id="r9-buscar">Buscar</button>
+          <button id="r9-limpiar" class="btn-secondary">Limpiar</button>
+        </div>
+        <div class="cargando" id="r9-cargando" hidden>Cargando...</div>
+        <div class="tabla-wrapper"><table id="r9-tabla" hidden><thead></thead><tbody></tbody></table></div>
+        <div class="paginacion" id="r9-paginacion" hidden>
+          <button id="r9-prev" class="btn-secondary">← Anterior</button>
+          <span id="r9-pagina-info"></span>
+          <button id="r9-next" class="btn-secondary">Siguiente →</button>
+        </div>
+        <pre id="r9-error" class="error-msg"></pre>
+      </div>
+
+      <!-- Reporte 10 -->
+      <div id="reporte-10" class="reporte-panel" hidden>
+        <h1>10. Método de envío favorito por ciudad</h1>
+        <p class="descripcion">Método de envío más usado según la ciudad de entrega.</p>
+        <div class="filtros">
+          <select id="r10-anio"><option value="">Todos los años</option></select>
+          <select id="r10-mes">
+            <option value="">Todos los meses</option>
+            <option value="1">Enero</option><option value="2">Febrero</option>
+            <option value="3">Marzo</option><option value="4">Abril</option>
+            <option value="5">Mayo</option><option value="6">Junio</option>
+            <option value="7">Julio</option><option value="8">Agosto</option>
+            <option value="9">Septiembre</option><option value="10">Octubre</option>
+            <option value="11">Noviembre</option><option value="12">Diciembre</option>
+          </select>
+          <select id="r10-categoria"><option value="">Todas las categorías</option></select>
+          <select id="r10-grupo"><option value="">Todas las categorias</option></select>
+          <select id="r10-producto"><option value="">Todos los productos</option></select>
+          <button id="r10-buscar">Buscar</button>
+          <button id="r10-limpiar" class="btn-secondary">Limpiar</button>
+        </div>
+        <div class="cargando" id="r10-cargando" hidden>Cargando...</div>
+        <div class="tabla-wrapper"><table id="r10-tabla" hidden><thead></thead><tbody></tbody></table></div>
+        <div class="paginacion" id="r10-paginacion" hidden>
+          <button id="r10-prev" class="btn-secondary">← Anterior</button>
+          <span id="r10-pagina-info"></span>
+          <button id="r10-next" class="btn-secondary">Siguiente →</button>
+        </div>
+        <pre id="r10-error" class="error-msg"></pre>
+      </div>
+
+    </section>
+  </main>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/estadisticas.js"></script>
+</body>
+</html>
