@@ -1,0 +1,65 @@
+services:
+  sj:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: nodo_sj
+    hostname: sj
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Proy2_Str0ng!Pass"
+      MSSQL_PID: "Developer"
+      MSSQL_AGENT_ENABLED: "true"
+      MSSQL_MEMORY_LIMIT_MB: "1700"
+
+
+    ports:
+      - "1437:1433"
+    volumes:
+      - sj_data:/var/opt/mssql
+      - ./backups:/backups
+    networks:
+      - redbd
+
+  limon:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: nodo_limon
+    hostname: limon
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Proy2_Str0ng!Pass"
+      MSSQL_PID: "Developer"
+      MSSQL_AGENT_ENABLED: "true"
+      MSSQL_MEMORY_LIMIT_MB: "1700"
+    ports:
+      - "1435:1433"
+    volumes:
+      - limon_data:/var/opt/mssql
+      - ./backups:/backups
+    networks:
+      - redbd
+
+  corp:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: nodo_corp
+    hostname: corp
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Proy2_Str0ng!Pass"
+      MSSQL_PID: "Developer"
+      MSSQL_AGENT_ENABLED: "true"
+      MSSQL_MEMORY_LIMIT_MB: "1700"
+
+    ports:
+      - "1436:1433"
+    volumes:
+      - corp_data:/var/opt/mssql
+      - ./backups:/backups
+    networks:
+      - redbd
+
+networks:
+  redbd:
+
+volumes:
+  sj_data:
+  limon_data:
+  corp_data:
