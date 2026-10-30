@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Proyecto 1 - Bases de Datos 2</title>
+  <link rel="stylesheet" href="../css/styles.css">
+</head>
+<body>
+  <nav class="navbar">
+    <a href="../index.html">Inicio</a>
+    <a href="clientes.html">Clientes</a>
+  </nav>
+
+  <main>
+    <h1>Gestión de clientes</h1>
+
+    <a href="cliente_form.html" class="btn-nuevo">+ Nuevo cliente</a>
+
+    <div class="filtros">
+      <input type="text" id="filtro-nombre" placeholder="Buscar por nombre...">
+
+      <select id="filtro-categoria">
+        <option value="">Todas las categorías</option>
+      </select>
+
+      <select id="filtro-metodo">
+        <option value="">Todos los métodos de entrega</option>
+      </select>
+
+      <button id="btn-buscar">Buscar</button>
+      <button id="btn-restaurar" class="btn-secondary">Restaurar</button>
+    </div>
+
+    <div id="cargando">Cargando...</div>
+
+    <table id="tabla-clientes" hidden>
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>Categoría</th>
+          <th>Método de entrega</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div id="paginacion" class="paginacion" hidden>
+      <button id="btn-anterior" class="btn-secondary">← Anterior</button>
+      <span id="info-pagina"></span>
+      <button id="btn-siguiente" class="btn-secondary">Siguiente →</button>
+    </div>
+    <p id="sin-resultados" hidden>No se encontraron clientes con esos filtros.</p>
+    <pre id="error"></pre>
+  </main>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/clientes.js"></script>
+</body>
+</html>
