@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title id="titulo-tab">Proyecto 1 - Bases de Datos 2</title>
+  <link rel="stylesheet" href="../css/styles.css">
+</head>
+<body>
+  <nav class="navbar">
+    <a href="../index.html">Inicio</a>
+    <a href="inventarios.html">Inventario</a>
+  </nav>
+
+  <main>
+    <h1 id="titulo">Nuevo producto</h1>
+    <p>Los campos con * son obligatorios.</p>
+
+    <form id="form-inventario" class="formulario ancho">
+      <h2>Información general</h2>
+      <label>Nombre *
+        <input type="text" id="nombre" maxlength="100" required>
+      </label>
+      <div class="dos-columnas">
+        <label>Proveedor *
+          <select id="proveedor" required></select>
+        </label>
+        <label id="label-grupo">Grupo *
+          <select id="grupo" required></select>
+        </label>
+        <label>Color
+          <select id="color"></select>
+        </label>
+        <label>Marca
+          <input type="text" id="marca" maxlength="50">
+        </label>
+        <label>Talla
+          <input type="text" id="talla" maxlength="20">
+        </label>
+      </div>
+
+      <h2>Empaquetamiento</h2>
+      <div class="dos-columnas">
+        <label>Unidad de empaquetamiento *
+          <select id="unidadEmpaque" required></select>
+        </label>
+        <label>Empaquetamiento *
+          <select id="empaqueExterior" required></select>
+        </label>
+        <label>Cantidad de empaquetamiento *
+          <input type="number" id="cantidadEmpaque" min="1" step="1" required>
+        </label>
+        <label>Peso (kg) *
+          <input type="number" id="peso" min="0" step="0.001" required>
+        </label>
+      </div>
+
+      <h2>Precios</h2>
+      <div class="dos-columnas">
+        <label>Precio unitario *
+          <input type="number" id="precioUnitario" min="0" step="0.01" required>
+        </label>
+        <label>Precio de venta
+          <input type="number" id="precioVenta" min="0" step="0.01">
+        </label>
+        <label>Impuesto (%) *
+          <input type="number" id="impuesto" min="0" max="100" step="0.001" required>
+        </label>
+      </div>
+
+      <h2>Inventario</h2>
+      <div class="dos-columnas">
+        <label>Cantidad en inventario *
+          <input type="number" id="cantidad" min="0" step="1" value="0" required>
+        </label>
+        <label>Ubicación *
+          <input type="text" id="ubicacion" maxlength="20" required>
+        </label>
+      </div>
+
+      <button type="submit" id="btn-guardar">Guardar</button>
+    </form>
+
+    <p id="error" style="color: red;"></p>
+  </main>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/inventario_form.js"></script>
+</body>
+</html>

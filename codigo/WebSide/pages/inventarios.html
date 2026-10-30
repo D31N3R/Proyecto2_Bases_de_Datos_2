@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Proyecto 1 - Bases de Datos 2</title>
+  <link rel="stylesheet" href="../css/styles.css">
+</head>
+<body>
+  <nav class="navbar">
+    <a href="../index.html">Inicio</a>
+    <a href="inventarios.html">Inventario</a>
+  </nav>
+
+  <main>
+    <h1>Gestión de inventario</h1>
+
+    <a href="inventario_form.html" class="btn-nuevo">+ Nuevo producto</a>
+
+    <div class="filtros">
+      <input type="text" id="filtro-nombre" placeholder="Buscar por nombre...">
+
+      <select id="filtro-grupo">
+        <option value="">Todos los grupos</option>
+      </select>
+
+      <button id="btn-buscar">Buscar</button>
+      <button id="btn-restaurar" class="btn-secondary">Restaurar</button>
+    </div>
+
+    <div id="cargando">Cargando...</div>
+
+    <table id="tabla-inventarios" hidden>
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>Grupo/s</th>
+          <th>Cantidad en inventarios</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div id="paginacion" class="paginacion" hidden>
+      <button id="btn-anterior" class="btn-secondary">← Anterior</button>
+      <span id="info-pagina"></span>
+      <button id="btn-siguiente" class="btn-secondary">Siguiente →</button>
+    </div>
+    <p id="sin-resultados" hidden>No se encontraron productos con esos filtros.</p>
+    <pre id="error"></pre>
+  </main>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/inventarios.js"></script>
+</body>
+</html>
