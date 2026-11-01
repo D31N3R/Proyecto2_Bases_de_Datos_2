@@ -47,6 +47,8 @@ BEGIN
     UPDATE Warehouse.StockItems
     SET StockItemName = @StockItemName,
         UnitPrice = @UnitPrice
+	ValidFrom = SYSDATETIME()
+
     WHERE StockItemID = @StockItemID
       AND ValidFrom = @ValidFromEsperado;
 
