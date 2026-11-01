@@ -93,4 +93,4 @@ SELECT 'Corp' AS Nodo,
     (SELECT COUNT(*) FROM Purchasing.SupplierTransactions) AS SupplierTransactions,
     (SELECT COUNT(*) FROM Warehouse.StockItemHoldings) AS StockItemHoldings,
     (SELECT COUNT(*) FROM Sales.Customers)             AS Clientes_Catalogo
-GOs
+GO
