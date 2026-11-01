@@ -8,7 +8,8 @@ services:
       MSSQL_SA_PASSWORD: "Proy2_Str0ng!Pass"
       MSSQL_PID: "Developer"
       MSSQL_AGENT_ENABLED: "true"
-      MSSQL_MEMORY_LIMIT_MB: "1700"
+      MSSQL_MEMORY_LIMIT_MB: "1800"
+      mem_limit: 1900m
 
 
     ports:
