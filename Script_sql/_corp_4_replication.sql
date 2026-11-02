@@ -3,8 +3,11 @@ GO
 
 /* ============================================================
    REPLICACION - Corp publica Warehouse.StockItems
-   Se vuelve su propio distribuidor local y se suscribe por
-   push a las publicaciones de SJ y Limon.
+   Corp es su propio distribuidor local y se suscribe por push
+   a SJ y Limon (hostnames de la red docker: sj, limon).
+
+   Los suscriptores ya tienen StockItems idéntico (viene del .bak),
+   por eso: @pre_creation_cmd = none y sync_type = replication support only.
    ============================================================ */
 
 DECLARE @pwd NVARCHAR(50) = N'Proy2_Str0ng!Pass';
@@ -43,7 +46,9 @@ BEGIN
          @allow_push = N'true', @allow_pull = N'true', @immediate_sync = N'true', @independent_agent = N'true';
 
     BEGIN TRY
-        EXEC sp_addpublication_snapshot @publication = N'Pub_Productos_Corp', @frequency_type = 1;
+        EXEC sp_addpublication_snapshot @publication = N'Pub_Productos_Corp', @frequency_type = 1,
+             @publisher_security_mode = 0, @publisher_login = N'sa',
+             @publisher_password = N'Proy2_Str0ng!Pass';
     END TRY
     BEGIN CATCH
         PRINT CONCAT('Corp - snapshot agent: ', ERROR_MESSAGE());
@@ -60,17 +65,67 @@ BEGIN
     EXEC sp_addarticle @publication = N'Pub_Productos_Corp', @article = N'StockItems',
          @source_owner = N'Warehouse', @source_object = N'StockItems',
          @destination_table = N'StockItems', @destination_owner = N'Warehouse',
-         @type = N'logbased';
+         @type = N'logbased', @pre_creation_cmd = N'none';
     PRINT 'Corp - articulo StockItems agregado';
 END
 ELSE
     PRINT 'Corp - articulo ya existia';
 GO
 
-BEGIN TRY
-    EXEC sp_addsubscription @publication = N'Pub_Productos_Corp', @subscriber = N'sj',
-         @destination_db = N'WideWorldImporters', @subscription_type = N'Push',
-         @sync_type = N'automatic';
-    EXEC sp_addpushsubscription_agent @publication = N'Pub_Productos_Corp', @subscriber = N'sj',
-         @subscriber_db = N'WideWorldImporters', @subscriber_security_mode = 0,
-         @subscriber_login = N'sa',
+-- ---------- Suscripcion SJ ----------
+IF NOT EXISTS (SELECT 1 FROM syssubscriptions WHERE srvname = N'sj')
+BEGIN
+    BEGIN TRY
+        EXEC sp_addsubscription @publication = N'Pub_Productos_Corp', @subscriber = N'sj',
+             @destination_db = N'WideWorldImporters', @subscription_type = N'Push',
+             @sync_type = N'replication support only';
+        EXEC sp_addpushsubscription_agent @publication = N'Pub_Productos_Corp', @subscriber = N'sj',
+             @subscriber_db = N'WideWorldImporters', @subscriber_security_mode = 0,
+             @subscriber_login = N'sa', @subscriber_password = N'Proy2_Str0ng!Pass',
+             @frequency_type = 64;
+        PRINT 'Corp - suscripcion SJ creada';
+    END TRY
+    BEGIN CATCH
+        PRINT CONCAT('Corp - ERROR suscripcion SJ: ', ERROR_MESSAGE());
+    END CATCH
+END
+ELSE
+    PRINT 'Corp - suscripcion SJ ya existia';
+GO
+
+-- ---------- Suscripcion Limon ----------
+IF NOT EXISTS (SELECT 1 FROM syssubscriptions WHERE srvname = N'limon')
+BEGIN
+    BEGIN TRY
+        EXEC sp_addsubscription @publication = N'Pub_Productos_Corp', @subscriber = N'limon',
+             @destination_db = N'WideWorldImporters', @subscription_type = N'Push',
+             @sync_type = N'replication support only';
+        EXEC sp_addpushsubscription_agent @publication = N'Pub_Productos_Corp', @subscriber = N'limon',
+             @subscriber_db = N'WideWorldImporters', @subscriber_security_mode = 0,
+             @subscriber_login = N'sa', @subscriber_password = N'Proy2_Str0ng!Pass',
+             @frequency_type = 64;
+        PRINT 'Corp - suscripcion Limon creada';
+    END TRY
+    BEGIN CATCH
+        PRINT CONCAT('Corp - ERROR suscripcion Limon: ', ERROR_MESSAGE());
+    END CATCH
+END
+ELSE
+    PRINT 'Corp - suscripcion Limon ya existia';
+GO
+
+PRINT 'Corp - replicacion configurada';
+GO
+-- Desactivar triggers DDL de replicacion: WWI tiene tablas memory-optimized,
+-- incompatibles con triggers DDL a nivel de base de datos. No se necesita
+-- rastrear cambios de esquema, solo de datos.
+IF EXISTS (SELECT 1 FROM sys.triggers WHERE name = 'tr_MStran_altertable' AND parent_class_desc = 'DATABASE')
+BEGIN
+    DISABLE TRIGGER tr_MStran_altertable ON DATABASE;
+    DISABLE TRIGGER tr_MStran_alterview ON DATABASE;
+    DISABLE TRIGGER tr_MStran_alterschemaonly ON DATABASE;
+    DISABLE TRIGGER tr_MStran_altertrigger ON DATABASE;
+    DISABLE TRIGGER tr_MStran_droptable ON DATABASE;
+    PRINT 'Corp: triggers DDL de replicacion desactivados (incompatibles con memory-optimized tables)';
+END
+GO

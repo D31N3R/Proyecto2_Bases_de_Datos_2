@@ -177,6 +177,7 @@ for entry in "${NODES[@]}"; do
   nodo="${entry%%:*}"
   log_info "$nodo: copiando $SQL_DIR → /tmp/sql/"
   docker exec "$nodo" mkdir -p /tmp/sql
+  docker exec "$nodo" mkdir -p /var/opt/mssql/ReplData
   if ! docker cp "$SQL_DIR/." "$nodo:/tmp/sql/" > /dev/null 2>&1; then
     log_error "$nodo: falló docker cp"
     exit 1
@@ -230,7 +231,10 @@ else
         exit 1
       fi
 
-      rm -f "$output_file"
+      mkdir -p /tmp/init_logs
+      mv "$output_file" "/tmp/init_logs/${nodo}_${script}.log"
+      cnt=$(docker exec -i "$nodo" "$SQLCMD" -S localhost -U sa -P "$SA_PASSWORD" -C -h -1 -d "$DB_NAME" -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM Warehouse.StockItems" 2>/dev/null | tr -d '[:space:]' || true)
+      log_info "$nodo: StockItems tras $script = $cnt"
     done
   done
   log_info "Todos los scripts ejecutados sin errores"

@@ -1,6 +1,7 @@
 USE WideWorldImporters;
 GO
-
+SET QUOTED_IDENTIFIER ON;
+GO
 /* ============================================================
    FRAGMENTACIÓN HORIZONTAL - CORPORATIVO
    Descubre dinámicamente TODAS las FKs, las deshabilita,
