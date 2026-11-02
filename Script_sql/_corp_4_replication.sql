@@ -116,3 +116,16 @@ GO
 
 PRINT 'Corp - replicacion configurada';
 GO
+-- Desactivar triggers DDL de replicacion: WWI tiene tablas memory-optimized,
+-- incompatibles con triggers DDL a nivel de base de datos. No se necesita
+-- rastrear cambios de esquema, solo de datos.
+IF EXISTS (SELECT 1 FROM sys.triggers WHERE name = 'tr_MStran_altertable' AND parent_class_desc = 'DATABASE')
+BEGIN
+    DISABLE TRIGGER tr_MStran_altertable ON DATABASE;
+    DISABLE TRIGGER tr_MStran_alterview ON DATABASE;
+    DISABLE TRIGGER tr_MStran_alterschemaonly ON DATABASE;
+    DISABLE TRIGGER tr_MStran_altertrigger ON DATABASE;
+    DISABLE TRIGGER tr_MStran_droptable ON DATABASE;
+    PRINT 'Corp: triggers DDL de replicacion desactivados (incompatibles con memory-optimized tables)';
+END
+GO
