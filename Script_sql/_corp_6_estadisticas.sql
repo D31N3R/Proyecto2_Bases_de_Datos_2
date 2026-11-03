@@ -29,6 +29,7 @@ BEGIN
     INSERT INTO dbo.Estadisticas_Ventas (Sucursal, Anio, Mes, TotalFacturas, TotalVentas)
     SELECT 'SJ', r.Anio, r.Mes, r.TotalFacturas, r.TotalVentas
     FROM OPENQUERY([sj], '
+        USE WideWorldImporters;
         SELECT YEAR(i.InvoiceDate) AS Anio, MONTH(i.InvoiceDate) AS Mes,
                COUNT(DISTINCT i.InvoiceID) AS TotalFacturas,
                SUM(il.ExtendedPrice) AS TotalVentas
@@ -40,6 +41,7 @@ BEGIN
     INSERT INTO dbo.Estadisticas_Ventas (Sucursal, Anio, Mes, TotalFacturas, TotalVentas)
     SELECT 'LIMON', r.Anio, r.Mes, r.TotalFacturas, r.TotalVentas
     FROM OPENQUERY([limon], '
+        USE WideWorldImporters;
         SELECT YEAR(i.InvoiceDate) AS Anio, MONTH(i.InvoiceDate) AS Mes,
                COUNT(DISTINCT i.InvoiceID) AS TotalFacturas,
                SUM(il.ExtendedPrice) AS TotalVentas
