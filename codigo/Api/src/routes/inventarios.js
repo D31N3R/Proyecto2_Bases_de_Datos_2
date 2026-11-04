@@ -3,61 +3,52 @@ const { getConnection, sql } = require('../db');
 
 const router = express.Router();
 
-// Convierte '' / undefined en null (para campos opcionales)
 const aNull = (v) => (v === '' || v === undefined ? null : v);
 
-// GET /api/inventarios/grupos
+// Lecturas: van al nodo del usuario logueado (el catalogo es igual en los 3)
 router.get('/inventarios/grupos', async (req, res) => {
   try {
-    const pool = await getConnection();
-    const result = await pool.request()
-      .execute('Api.usp_Inventario_Grupos');
+    const pool = await getConnection(req.nodo);
+    const result = await pool.request().execute('Api.usp_Inventario_Grupos');
     res.json(result.recordset);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// GET /api/inventarios/colores
 router.get('/inventarios/colores', async (req, res) => {
   try {
-    const pool = await getConnection();
-    const result = await pool.request()
-      .execute('Api.usp_Inventario_Colores');
+    const pool = await getConnection(req.nodo);
+    const result = await pool.request().execute('Api.usp_Inventario_Colores');
     res.json(result.recordset);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// GET /api/inventarios/tipos-empaque
 router.get('/inventarios/tipos-empaque', async (req, res) => {
   try {
-    const pool = await getConnection();
-    const result = await pool.request()
-      .execute('Api.usp_Inventario_TiposEmpaque');
+    const pool = await getConnection(req.nodo);
+    const result = await pool.request().execute('Api.usp_Inventario_TiposEmpaque');
     res.json(result.recordset);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// GET /api/inventarios/proveedores
 router.get('/inventarios/proveedores', async (req, res) => {
   try {
-    const pool = await getConnection();
-    const result = await pool.request()
-      .execute('Api.usp_Inventario_Proveedores');
+    const pool = await getConnection(req.nodo);
+    const result = await pool.request().execute('Api.usp_Inventario_Proveedores');
     res.json(result.recordset);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// GET /api/inventarios?nombre=X&grupo=Y
 router.get('/inventarios', async (req, res) => {
   try {
-    const pool = await getConnection();
+    const pool = await getConnection(req.nodo);
     const result = await pool.request()
       .input('Nombre', sql.NVarChar(100), req.query.nombre || null)
       .input('StockGroupID', sql.Int, req.query.grupo ? parseInt(req.query.grupo) : null)
@@ -69,10 +60,9 @@ router.get('/inventarios', async (req, res) => {
   }
 });
 
-// GET /api/inventarios/:id
 router.get('/inventarios/:id', async (req, res) => {
   try {
-    const pool = await getConnection();
+    const pool = await getConnection(req.nodo);
     const result = await pool.request()
       .input('StockItemID', sql.Int, req.params.id)
       .execute('Api.usp_Inventario_Detalle');
@@ -86,11 +76,12 @@ router.get('/inventarios/:id', async (req, res) => {
   }
 });
 
-// POST /api/inventarios - crear
+// Escrituras de productos: SIEMPRE van a Corp, sin importar la sucursal
+// del usuario. Corp las replica automaticamente a sj y limon.
 router.post('/inventarios', async (req, res) => {
   try {
     const b = req.body;
-    const pool = await getConnection();
+    const pool = await getConnection('corp');
     const request = pool.request()
       .input('StockItemName', sql.NVarChar(100), b.nombre)
       .input('SupplierID', sql.Int, b.proveedor)
@@ -116,11 +107,10 @@ router.post('/inventarios', async (req, res) => {
   }
 });
 
-// PUT /api/inventarios/:id - modificar
 router.put('/inventarios/:id', async (req, res) => {
   try {
     const b = req.body;
-    const pool = await getConnection();
+    const pool = await getConnection('corp');
     await pool.request()
       .input('StockItemID', sql.Int, req.params.id)
       .input('StockItemName', sql.NVarChar(100), b.nombre)
@@ -144,10 +134,9 @@ router.put('/inventarios/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/inventarios/:id - eliminar
 router.delete('/inventarios/:id', async (req, res) => {
   try {
-    const pool = await getConnection();
+    const pool = await getConnection('corp');
     await pool.request()
       .input('StockItemID', sql.Int, req.params.id)
       .execute('Api.usp_Inventario_Eliminar');
