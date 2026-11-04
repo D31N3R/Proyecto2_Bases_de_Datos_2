@@ -7,6 +7,21 @@ GO
 IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'Api')
     EXEC('CREATE SCHEMA Api');
 GO
+
+/* ============================================================
+   CONFIGURACION DEL NODO (una sola fila por nodo)
+   - Paridad: 0 = IDs pares (SJ), 1 = impares (Limon), NULL = no factura (Corp)
+   - Nodo   : 'SJ', 'LIMON' o 'CORP'. Lo usan los procedures para
+              (a) generar IDs segun la fragmentacion y
+              (b) permitir editar el catalogo solo en Corp.
+   La fila la inserta el script de fragmentacion de cada nodo.
+   ============================================================ */
+IF OBJECT_ID('dbo.NodoConfig') IS NULL
+    CREATE TABLE dbo.NodoConfig (
+        Nodo    NVARCHAR(10) NOT NULL PRIMARY KEY,
+        Paridad TINYINT NULL
+    );
+GO
 /* ============================================================
    SINÓNIMOS PARA CLIENTES
    ============================================================ */

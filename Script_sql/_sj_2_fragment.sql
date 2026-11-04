@@ -110,3 +110,9 @@ SELECT 'SJ' AS Nodo,
     (SELECT COUNT(*) FROM Warehouse.StockItemHoldings)     AS StockHoldings,
     (SELECT COUNT(*) FROM Sales.Customers)                 AS Clientes
 GO
+
+USE WideWorldImporters;
+GO
+IF NOT EXISTS (SELECT 1 FROM dbo.NodoConfig)
+    INSERT INTO dbo.NodoConfig (Nodo, Paridad) VALUES (N'SJ', 0);
+GO

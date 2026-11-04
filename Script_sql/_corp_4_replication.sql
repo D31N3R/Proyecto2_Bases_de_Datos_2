@@ -60,16 +60,31 @@ ELSE
     PRINT 'Corp - publicacion ya existia';
 GO
 
-IF NOT EXISTS (SELECT 1 FROM sysarticles WHERE name = N'StockItems')
+-- Producto y sus tablas relacionadas (el inventario por sucursal, StockItemHoldings, NO se replica)
+DECLARE @art TABLE (Esquema SYSNAME, Tabla SYSNAME);
+INSERT @art VALUES (N'Warehouse', N'StockItems'),
+                   (N'Warehouse', N'StockItemStockGroups'),
+                   (N'Warehouse', N'StockGroups'),
+                   (N'Warehouse', N'Colors'),
+                   (N'Warehouse', N'PackageTypes');
+DECLARE @e SYSNAME, @t SYSNAME;
+DECLARE ca CURSOR LOCAL FAST_FORWARD FOR SELECT Esquema, Tabla FROM @art;
+OPEN ca; FETCH NEXT FROM ca INTO @e, @t;
+WHILE @@FETCH_STATUS = 0
 BEGIN
-    EXEC sp_addarticle @publication = N'Pub_Productos_Corp', @article = N'StockItems',
-         @source_owner = N'Warehouse', @source_object = N'StockItems',
-         @destination_table = N'StockItems', @destination_owner = N'Warehouse',
-         @type = N'logbased', @pre_creation_cmd = N'none';
-    PRINT 'Corp - articulo StockItems agregado';
+    IF NOT EXISTS (SELECT 1 FROM sysarticles WHERE name = @t)
+    BEGIN
+        EXEC sp_addarticle @publication = N'Pub_Productos_Corp', @article = @t,
+             @source_owner = @e, @source_object = @t,
+             @destination_table = @t, @destination_owner = @e,
+             @type = N'logbased', @pre_creation_cmd = N'none';
+        PRINT CONCAT('Corp - articulo ', @t, ' agregado');
+    END
+    ELSE
+        PRINT CONCAT('Corp - articulo ', @t, ' ya existia');
+    FETCH NEXT FROM ca INTO @e, @t;
 END
-ELSE
-    PRINT 'Corp - articulo ya existia';
+CLOSE ca; DEALLOCATE ca;
 GO
 
 -- ---------- Suscripcion SJ ----------
