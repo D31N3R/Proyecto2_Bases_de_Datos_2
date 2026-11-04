@@ -264,15 +264,23 @@ BEGIN
       AND NOT EXISTS (SELECT 1 FROM @Calc c WHERE c.InvoiceLineID = il.InvoiceLineID);
 
     -- Líneas nuevas
-    DECLARE @BaseLineID INT =
+    DECLARE @ParidadLinea TINYINT = (SELECT Paridad FROM dbo.NodoConfig);
+    IF @ParidadLinea IS NULL
+        THROW 50061, 'Este nodo no maneja facturas: solo las sucursales (SJ y Limón) las crean.', 1;
+
+    -- IDs de linea nuevos: paridad del nodo y siempre por encima de 1,000,000
+    -- (mayor que cualquier ID historico), para no chocar con las lineas de la otra sucursal.
+    DECLARE @MaxLinea INT =
         (SELECT ISNULL(MAX(InvoiceLineID), 0) FROM Syn.InvoiceLines WITH (UPDLOCK, HOLDLOCK));
+    DECLARE @PrimerLineID INT = CASE WHEN @MaxLinea < 1000000 THEN 1000000 ELSE @MaxLinea END + 1;
+    IF @PrimerLineID % 2 <> @ParidadLinea SET @PrimerLineID += 1;
 
     INSERT INTO Syn.InvoiceLines (
         InvoiceLineID, InvoiceID, StockItemID, Description, PackageTypeID,
         Quantity, UnitPrice, TaxRate, TaxAmount, LineProfit, ExtendedPrice, LastEditedBy
     )
     SELECT
-        @BaseLineID + ROW_NUMBER() OVER (ORDER BY c.StockItemID),
+        @PrimerLineID + 2 * (ROW_NUMBER() OVER (ORDER BY c.StockItemID) - 1),
         @InvoiceID, c.StockItemID, c.Description, c.PackageTypeID,
         c.Quantity, c.UnitPrice, c.TaxRate, c.TaxAmount, c.LineProfit, c.ExtendedPrice,
         @EditorPersonID
@@ -343,8 +351,14 @@ BEGIN
             @ContactPersonID);
 
         DECLARE @SistemaPersonID INT = (SELECT MIN(PersonID) FROM Syn.People);
+        DECLARE @ParidadNodo TINYINT = (SELECT Paridad FROM dbo.NodoConfig);
+        IF @ParidadNodo IS NULL
+            THROW 50060, 'Este nodo no maneja facturas: solo las sucursales (SJ y Limón) las crean.', 1;
+
+        -- Fragmentacion por paridad: SJ genera IDs pares y Limon impares
         DECLARE @NextID INT =
             (SELECT ISNULL(MAX(InvoiceID), 0) + 1 FROM Syn.Invoices WITH (UPDLOCK, HOLDLOCK));
+        IF @NextID % 2 <> @ParidadNodo SET @NextID += 1;
 
         INSERT INTO Syn.Invoices (
             InvoiceID, CustomerID, BillToCustomerID, OrderID, DeliveryMethodID,

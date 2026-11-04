@@ -95,3 +95,9 @@ SELECT 'Corp' AS Nodo,
     (SELECT COUNT(*) FROM Warehouse.StockItemHoldings) AS StockItemHoldings,
     (SELECT COUNT(*) FROM Sales.Customers)             AS Clientes_Catalogo
 GO
+
+USE WideWorldImporters;
+GO
+IF NOT EXISTS (SELECT 1 FROM dbo.NodoConfig)
+    INSERT INTO dbo.NodoConfig (Nodo, Paridad) VALUES (N'CORP', NULL);
+GO

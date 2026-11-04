@@ -198,6 +198,9 @@ CREATE OR ALTER PROCEDURE Api.usp_Inventario_Crear
 AS
 BEGIN
     SET NOCOUNT ON;
+    -- El catalogo de productos se edita solo en Corp y se replica a las sucursales
+    IF ISNULL((SELECT Nodo FROM dbo.NodoConfig), N'') <> N'CORP'
+        THROW 50070, 'El catálogo de productos solo se modifica en el nodo Corporativo; se replica a las sucursales.', 1;
     SET XACT_ABORT ON;
     BEGIN TRY
         BEGIN TRANSACTION;
@@ -278,6 +281,9 @@ CREATE OR ALTER PROCEDURE Api.usp_Inventario_Modificar
 AS
 BEGIN
     SET NOCOUNT ON;
+    -- El catalogo de productos se edita solo en Corp y se replica a las sucursales
+    IF ISNULL((SELECT Nodo FROM dbo.NodoConfig), N'') <> N'CORP'
+        THROW 50070, 'El catálogo de productos solo se modifica en el nodo Corporativo; se replica a las sucursales.', 1;
     SET XACT_ABORT ON;
     BEGIN TRY
         BEGIN TRANSACTION;
@@ -332,6 +338,9 @@ CREATE OR ALTER PROCEDURE Api.usp_Inventario_Eliminar
 AS
 BEGIN
     SET NOCOUNT ON;
+    -- El catalogo de productos se edita solo en Corp y se replica a las sucursales
+    IF ISNULL((SELECT Nodo FROM dbo.NodoConfig), N'') <> N'CORP'
+        THROW 50070, 'El catálogo de productos solo se modifica en el nodo Corporativo; se replica a las sucursales.', 1;
     SET XACT_ABORT ON;
     BEGIN TRY
         BEGIN TRANSACTION;
