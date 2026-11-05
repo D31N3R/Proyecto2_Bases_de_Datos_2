@@ -593,7 +593,7 @@ form.formulario button#btn-agregar-linea {
 /* ============ Toasts ============ */
 #toast-contenedor {
   position: fixed;
-  top: 16px;
+  top: 56px;
   right: 16px;
   z-index: 1000;
   display: flex;
@@ -649,4 +649,97 @@ form.formulario button#btn-agregar-linea {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* ============ Login y barra de sesión ============ */
+.login-pagina {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.login-caja {
+  background: #ffffff;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  padding: 28px 32px;
+  width: 100%;
+  max-width: 360px;
+}
+
+.login-caja h1 {
+  font-size: 18px;
+  margin-bottom: 4px;
+}
+
+.login-caja .login-sub {
+  color: #666;
+  margin-bottom: 20px;
+}
+
+.login-caja label {
+  display: block;
+  margin: 12px 0 4px;
+  color: #444;
+}
+
+.login-caja input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #c4c4c4;
+  border-radius: 3px;
+  font: inherit;
+}
+
+.login-caja input:focus {
+  outline: none;
+  border-color: #6a9bd8;
+}
+
+.login-caja button[type="submit"] {
+  width: 100%;
+  margin-top: 20px;
+  padding: 9px;
+}
+
+.login-error {
+  margin-top: 14px;
+  padding: 8px 10px;
+  background: #fdeaea;
+  border: 1px solid #e3aaaa;
+  border-radius: 3px;
+  color: #8a1f1f;
+}
+
+.login-ayuda {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid #eee;
+  color: #777;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.barra-sesion {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 42px;
+  padding: 0 14px;
+  background: #ffffff;
+  border-bottom: 1px solid #d0d0d0;
+  border-left: 1px solid #d0d0d0;
+  font-size: 12px;
+  color: #444;
+}
+
+.barra-sesion button {
+  padding: 4px 10px;
 }

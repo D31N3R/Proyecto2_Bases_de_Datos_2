@@ -3,43 +3,57 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Proyecto 1 - Bases de Datos 2</title>
+  <title>Wide World Importers</title>
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
   <main class="home">
     <header class="home-header">
       <h1>Gestor Wide World Importers</h1>
-      <p>Seleccione un módulo</p>
+      <p id="bienvenida">Seleccione un módulo</p>
     </header>
 
     <section class="modulos">
-      <a href="pages/clientes.html" class="modulo-card">
+      <a href="pages/clientes.html" class="modulo-card" data-solo-admin>
         <h2>Clientes</h2>
         <p>Gestión de clientes</p>
       </a>
 
-      <a href="pages/proveedores.html" class="modulo-card">
+      <a href="pages/proveedores.html" class="modulo-card" data-solo-admin>
         <h2>Proveedores</h2>
         <p>Gestión de proveedores</p>
       </a>
 
-      <a href="pages/inventarios.html" class="modulo-card">
+      <a href="pages/inventarios.html" class="modulo-card" data-solo-admin>
         <h2>Inventario</h2>
         <p>Gestión de inventario</p>
       </a>
 
-      <a href="pages/ventas.html" class="modulo-card">
+      <a href="pages/ventas.html" class="modulo-card" data-solo-admin>
         <h2>Ventas</h2>
         <p>Gestión de ventas</p>
       </a>
 
       <a href="pages/estadisticas.html" class="modulo-card">
         <h2>Estadísticas</h2>
-        <p>Estadisticas del negocio</p>
+        <p>Estadísticas del negocio</p>
       </a>
-      
     </section>
   </main>
+
+  <script src="js/api.js"></script>
+  <script>
+    const sesion = getSesion();
+    if (sesion) {
+      const donde = esCorporativo() ? 'Corporativo' : `Sucursal ${sesion.sucursal}`;
+      document.getElementById('bienvenida').textContent =
+        `Bienvenido, ${sesion.fullname} (${donde}). Seleccione un módulo`;
+
+      // El rol Corporativo solo consulta estadísticas
+      if (esCorporativo()) {
+        document.querySelectorAll('[data-solo-admin]').forEach((el) => el.remove());
+      }
+    }
+  </script>
 </body>
 </html>

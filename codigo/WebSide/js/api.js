@@ -1,7 +1,105 @@
 const API_URL = `http://${window.location.hostname}:4000`;
 
-async function apiGet(path) {
-  const res = await fetch(API_URL + path);
+// ================== Sesión ==================
+// No hay módulo de sesiones (el enunciado no lo pide): el login guarda el usuario
+// en sessionStorage y cada petición manda su sucursal en el header X-Sucursal,
+// que la API usa para elegir a qué nodo conectarse.
+const ENLACE_BASE = window.location.pathname.includes('/pages/') ? '../' : '';
+
+function getSesion() {
+  try {
+    return JSON.parse(sessionStorage.getItem('sesion'));
+  } catch (e) {
+    return null;
+  }
+}
+
+function guardarSesion(usuario) {
+  sessionStorage.setItem('sesion', JSON.stringify(usuario));
+}
+
+function irALogin() {
+  window.location.replace(ENLACE_BASE + 'login.html');
+}
+
+function cerrarSesion() {
+  sessionStorage.removeItem('sesion');
+  irALogin();
+}
+
+function esCorporativo() {
+  const s = getSesion();
+  return !!s && s.rol === 'Corporativo';
+}
+
+// Nodo con el que debe hablar la API para esta sesión: SJ, LIMON o CORP
+function sucursalDeSesion() {
+  const s = getSesion();
+  if (!s) return '';
+  if (s.rol === 'Corporativo') return 'CORP';
+  return String(s.sucursal || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase();
+}
+
+// Sin sesión no hay a dónde ir: se manda al login. El Corporativo solo ve estadísticas.
+if (!window.PAGINA_PUBLICA) {
+  const sesion = getSesion();
+  const enPages = window.location.pathname.includes('/pages/');
+  if (!sesion) {
+    irALogin();
+  } else if (sesion.rol === 'Corporativo' && enPages &&
+             !/estadisticas(\.html)?$/.test(window.location.pathname)) {
+    window.location.replace('../index.html');
+  }
+}
+
+// Barra superior con el usuario y el botón para cerrar sesión
+function mostrarBarraSesion() {
+  const s = getSesion();
+  if (!s || window.PAGINA_PUBLICA) return;
+
+  const estilos = document.createElement('link');
+  estilos.rel = 'stylesheet';
+  estilos.href = ENLACE_BASE + 'css/sesion.css';
+  document.head.appendChild(estilos);
+
+  const barra = document.createElement('div');
+  barra.className = 'barra-sesion';
+
+  const quien = document.createElement('span');
+  const donde = s.rol === 'Corporativo' ? 'Corporativo' : `Sucursal ${s.sucursal}`;
+  quien.textContent = `${s.fullname} · ${donde}`;
+
+  const boton = document.createElement('button');
+  boton.type = 'button';
+  boton.className = 'btn-secondary';
+  boton.textContent = 'Cerrar sesión';
+  boton.addEventListener('click', cerrarSesion);
+
+  barra.append(quien, boton);
+  document.body.appendChild(barra);
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', mostrarBarraSesion);
+} else {
+  mostrarBarraSesion();
+}
+
+// ================== Llamadas a la API ==================
+async function pedir(metodo, path, body) {
+  const sucursal = sucursalDeSesion();
+  if (!sucursal) throw new Error('Sesión no iniciada');
+
+  const opciones = { method: metodo, headers: { 'X-Sucursal': sucursal } };
+  if (body !== undefined) {
+    opciones.headers['Content-Type'] = 'application/json';
+    opciones.body = JSON.stringify(body);
+  }
+
+  const res = await fetch(API_URL + path, opciones);
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || `Error ${res.status}`);
@@ -9,41 +107,21 @@ async function apiGet(path) {
   return res.json();
 }
 
-async function apiPost(path, body) {
-  const res = await fetch(API_URL + path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || `Error ${res.status}`);
-  }
-  return res.json();
+function apiGet(path) {
+  return pedir('GET', path);
 }
 
-async function apiPut(path, body) {
-  const res = await fetch(API_URL + path, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || `Error ${res.status}`);
-  }
-  return res.json();
+function apiPost(path, body) {
+  return pedir('POST', path, body);
 }
 
-async function apiDelete(path) {
-  const res = await fetch(API_URL + path, { method: 'DELETE' });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || `Error ${res.status}`);
-  }
-  return res.json();
+function apiPut(path, body) {
+  return pedir('PUT', path, body);
 }
 
+function apiDelete(path) {
+  return pedir('DELETE', path);
+}
 // Muestra un mensaje flotante; tipo puede ser 'exito' o 'error'
 function mostrarToast(mensaje, tipo = 'exito') {
   let contenedor = document.getElementById('toast-contenedor');

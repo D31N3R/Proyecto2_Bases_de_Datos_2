@@ -32,7 +32,7 @@ function agregarCampos(request, body) {
 // GET /api/proveedores/categorias
 router.get('/proveedores/categorias', async (req, res) => {
   try {
-    const pool = await getConnection();
+    const pool = await getConnection(req.nodo);
     const result = await pool.request()
       .execute('Api.usp_Proveedores_Categorias');
     res.json(result.recordset);
@@ -44,7 +44,7 @@ router.get('/proveedores/categorias', async (req, res) => {
 // GET /api/proveedores?nombre=X&categoria=Y
 router.get('/proveedores', async (req, res) => {
   try {
-    const pool = await getConnection();
+    const pool = await getConnection(req.nodo);
     const result = await pool.request()
       .input('Nombre', sql.NVarChar(100), req.query.nombre || null)
       .input('SupplierCategoryID', sql.Int, req.query.categoria ? parseInt(req.query.categoria) : null)
@@ -59,7 +59,7 @@ router.get('/proveedores', async (req, res) => {
 // GET /api/proveedores/:id
 router.get('/proveedores/:id', async (req, res) => {
   try {
-    const pool = await getConnection();
+    const pool = await getConnection(req.nodo);
     const result = await pool.request()
       .input('SupplierID', sql.Int, req.params.id)
       .execute('Api.usp_Proveedores_Detalle');
@@ -76,7 +76,7 @@ router.get('/proveedores/:id', async (req, res) => {
 // POST /api/proveedores - crear
 router.post('/proveedores', async (req, res) => {
   try {
-    const pool = await getConnection();
+    const pool = await getConnection(req.nodo);
     const request = pool.request()
       .input('SupplierName', sql.NVarChar(100), req.body.nombre)
       .input('SupplierReference', sql.NVarChar(20), req.body.referencia || null)
@@ -110,7 +110,7 @@ router.post('/proveedores', async (req, res) => {
 // PUT /api/proveedores/:id - modificar
 router.put('/proveedores/:id', async (req, res) => {
   try {
-    const pool = await getConnection();
+    const pool = await getConnection(req.nodo);
     await pool.request()
       .input('SupplierID', sql.Int, req.params.id)
       .input('SupplierName', sql.NVarChar(100), req.body.nombre)
@@ -143,7 +143,7 @@ router.put('/proveedores/:id', async (req, res) => {
 // DELETE /api/proveedores/:id - eliminar
 router.delete('/proveedores/:id', async (req, res) => {
   try {
-    const pool = await getConnection();
+    const pool = await getConnection(req.nodo);
     await pool.request()
       .input('SupplierID', sql.Int, req.params.id)
       .execute('Api.usp_Proveedores_Eliminar');
