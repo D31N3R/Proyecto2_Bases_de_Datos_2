@@ -33,7 +33,7 @@ function parametrosVenta(request, b) {
 // GET /api/ventas/clientes
 router.get('/ventas/clientes', async (req, res) => {
   try {
-    const pool = await getConnection();
+    const pool = await getConnection(req.nodo);
     const result = await pool.request().execute('Api.usp_Ventas_Clientes');
     res.json(result.recordset);
   } catch (error) {
@@ -44,7 +44,7 @@ router.get('/ventas/clientes', async (req, res) => {
 // GET /api/ventas/vendedores
 router.get('/ventas/vendedores', async (req, res) => {
   try {
-    const pool = await getConnection();
+    const pool = await getConnection(req.nodo);
     const result = await pool.request().execute('Api.usp_Ventas_Vendedores');
     res.json(result.recordset);
   } catch (error) {
@@ -55,7 +55,7 @@ router.get('/ventas/vendedores', async (req, res) => {
 // GET /api/ventas/productos
 router.get('/ventas/productos', async (req, res) => {
   try {
-    const pool = await getConnection();
+    const pool = await getConnection(req.nodo);
     const result = await pool.request().execute('Api.usp_Ventas_Productos');
     res.json(result.recordset);
   } catch (error) {
@@ -66,7 +66,7 @@ router.get('/ventas/productos', async (req, res) => {
 // GET /api/ventas?nombre=X&metodoEntrega=Y&fechaDesde=Z&fechaHasta=W&montoMin=A&montoMax=B&pagina=N
 router.get('/ventas', async (req, res) => {
   try {
-    const pool = await getConnection();
+    const pool = await getConnection(req.nodo);
     const result = await pool.request()
       .input('Nombre', sql.NVarChar(100), req.query.nombre || null)
       .input('DeliveryMethodID', sql.Int, req.query.metodoEntrega ? parseInt(req.query.metodoEntrega) : null)
@@ -85,7 +85,7 @@ router.get('/ventas', async (req, res) => {
 // GET /api/ventas/:id
 router.get('/ventas/:id', async (req, res) => {
   try {
-    const pool = await getConnection();
+    const pool = await getConnection(req.nodo);
 
     const encabezado = await pool.request()
       .input('InvoiceID', sql.Int, req.params.id)
@@ -115,7 +115,7 @@ router.post('/ventas', async (req, res) => {
     if (!Array.isArray(b.lineas)) {
       return res.status(400).json({ error: 'Debe enviar la lista de líneas de la factura.' });
     }
-    const pool = await getConnection();
+    const pool = await getConnection(req.nodo);
     const request = parametrosVenta(pool.request(), b)
       .output('NuevoInvoiceID', sql.Int);
 
@@ -133,7 +133,7 @@ router.put('/ventas/:id', async (req, res) => {
     if (!Array.isArray(b.lineas)) {
       return res.status(400).json({ error: 'Debe enviar la lista de líneas de la factura.' });
     }
-    const pool = await getConnection();
+    const pool = await getConnection(req.nodo);
     await parametrosVenta(pool.request(), b)
       .input('InvoiceID', sql.Int, req.params.id)
       .execute('Api.usp_Ventas_Modificar');

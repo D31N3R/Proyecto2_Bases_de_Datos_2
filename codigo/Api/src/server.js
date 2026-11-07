@@ -20,14 +20,17 @@ app.get('/api/status', (req, res) => {
   res.json({ status: 'activo' });
 });
 
+// El nodo se resuelve ANTES de las rutas (lee el header X-Sucursal).
+// /api/login es publico; todas las demas rutas necesitan sucursal.
+app.use('/api', resolveNodo);
+
+app.use('/api', authRouter);
 app.use('/api', commonRouter);
 app.use('/api', clientesRouter);
 app.use('/api', proveedoresRouter);
 app.use('/api', inventariosRouter);
 app.use('/api', ventasRouter);
 app.use('/api', estadisticasRouter);
-app.use('/api', authRouter);
-app.use(resolveNodo);
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
