@@ -60,11 +60,6 @@ function mostrarBarraSesion() {
   const s = getSesion();
   if (!s || window.PAGINA_PUBLICA) return;
 
-  const estilos = document.createElement('link');
-  estilos.rel = 'stylesheet';
-  estilos.href = ENLACE_BASE + 'css/sesion.css';
-  document.head.appendChild(estilos);
-
   const barra = document.createElement('div');
   barra.className = 'barra-sesion';
 
