@@ -1,6 +1,73 @@
 USE WideWorldImporters;
 GO
 
+/* ============================================================
+   ESTADISTICAS CONSOLIDADAS (solo Corp) - vistas materializadas
+
+   Corp no guarda facturas ni ordenes de compra: viven en las sucursales
+   (fragmentacion). Para consultarlas en conjunto, Corp mantiene una COPIA
+   MATERIALIZADA en el esquema Consolidado (solo las columnas que usan los
+   reportes, mas la columna Sucursal). Se vuelve a llenar con
+   Api.usp_Estadisticas_Refrescar.
+
+   Los sinonimos Syn.* de esas 4 tablas apuntan al consolidado en Corp, asi
+   los mismos procedimientos de reportes (_all_05) funcionan en Corp sin
+   cambios.
+
+   El filtro por sucursal lo resuelve la API: SJ y Limon se consultan en vivo
+   en su propio nodo; la consolidada se consulta aqui, en Corp.
+   ============================================================ */
+
+IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'Consolidado')
+    EXEC('CREATE SCHEMA Consolidado');
+GO
+
+-- Tablas vacias con las mismas columnas que las originales, para que todo exista
+-- desde la instalacion (se llenan al refrescar, cuando las sucursales ya estan fragmentadas)
+IF OBJECT_ID('Consolidado.Invoices', 'U') IS NULL
+    SELECT CAST(N'' AS NVARCHAR(10)) AS Sucursal,
+           InvoiceID, CustomerID, BillToCustomerID, OrderID, DeliveryMethodID,
+           SalespersonPersonID, InvoiceDate
+    INTO Consolidado.Invoices
+    FROM Sales.Invoices WHERE 1 = 0;
+GO
+
+IF OBJECT_ID('Consolidado.InvoiceLines', 'U') IS NULL
+    SELECT CAST(N'' AS NVARCHAR(10)) AS Sucursal,
+           InvoiceLineID, InvoiceID, StockItemID, Quantity, UnitPrice, TaxAmount,
+           LineProfit, ExtendedPrice
+    INTO Consolidado.InvoiceLines
+    FROM Sales.InvoiceLines WHERE 1 = 0;
+GO
+
+IF OBJECT_ID('Consolidado.PurchaseOrders', 'U') IS NULL
+    SELECT CAST(N'' AS NVARCHAR(10)) AS Sucursal,
+           PurchaseOrderID, SupplierID, OrderDate, DeliveryMethodID,
+           ExpectedDeliveryDate, IsOrderFinalized
+    INTO Consolidado.PurchaseOrders
+    FROM Purchasing.PurchaseOrders WHERE 1 = 0;
+GO
+
+IF OBJECT_ID('Consolidado.PurchaseOrderLines', 'U') IS NULL
+    SELECT CAST(N'' AS NVARCHAR(10)) AS Sucursal,
+           PurchaseOrderLineID, PurchaseOrderID, StockItemID, OrderedOuters,
+           ReceivedOuters, ExpectedUnitPricePerOuter
+    INTO Consolidado.PurchaseOrderLines
+    FROM Purchasing.PurchaseOrderLines WHERE 1 = 0;
+GO
+
+-- En Corp, los reportes leen el consolidado
+DROP SYNONYM IF EXISTS Syn.Invoices;
+CREATE SYNONYM Syn.Invoices FOR Consolidado.Invoices;
+DROP SYNONYM IF EXISTS Syn.InvoiceLines;
+CREATE SYNONYM Syn.InvoiceLines FOR Consolidado.InvoiceLines;
+DROP SYNONYM IF EXISTS Syn.PurchaseOrders;
+CREATE SYNONYM Syn.PurchaseOrders FOR Consolidado.PurchaseOrders;
+DROP SYNONYM IF EXISTS Syn.PurchaseOrderLines;
+CREATE SYNONYM Syn.PurchaseOrderLines FOR Consolidado.PurchaseOrderLines;
+GO
+
+-- Resumen mensual materializado (ventas por sucursal, anio y mes)
 IF OBJECT_ID('dbo.Estadisticas_Ventas', 'U') IS NOT NULL
     DROP TABLE dbo.Estadisticas_Ventas;
 GO
@@ -16,47 +83,88 @@ CREATE TABLE dbo.Estadisticas_Ventas (
 );
 GO
 
-IF OBJECT_ID('Api.usp_Estadisticas_Refrescar', 'P') IS NOT NULL
-    DROP PROCEDURE Api.usp_Estadisticas_Refrescar;
-GO
-
-CREATE PROCEDURE Api.usp_Estadisticas_Refrescar
+/* Copia los datos de ambas sucursales a Consolidado.* y recalcula el resumen mensual.
+   Sin transaccion explicita: una transaccion que lee de linked servers pide MSDTC. */
+CREATE OR ALTER PROCEDURE Api.usp_Estadisticas_Refrescar
 AS
 BEGIN
     SET NOCOUNT ON;
+
+    -- Facturas
+    DROP TABLE IF EXISTS Consolidado.Invoices;
+    SELECT CAST(N'SJ' AS NVARCHAR(10)) AS Sucursal,
+           InvoiceID, CustomerID, BillToCustomerID, OrderID, DeliveryMethodID,
+           SalespersonPersonID, InvoiceDate
+    INTO Consolidado.Invoices
+    FROM [sj].WideWorldImporters.Sales.Invoices;
+
+    INSERT INTO Consolidado.Invoices
+        (Sucursal, InvoiceID, CustomerID, BillToCustomerID, OrderID, DeliveryMethodID,
+         SalespersonPersonID, InvoiceDate)
+    SELECT N'LIMON', InvoiceID, CustomerID, BillToCustomerID, OrderID, DeliveryMethodID,
+           SalespersonPersonID, InvoiceDate
+    FROM [limon].WideWorldImporters.Sales.Invoices;
+
+    -- Lineas de factura
+    DROP TABLE IF EXISTS Consolidado.InvoiceLines;
+    SELECT CAST(N'SJ' AS NVARCHAR(10)) AS Sucursal,
+           InvoiceLineID, InvoiceID, StockItemID, Quantity, UnitPrice, TaxAmount,
+           LineProfit, ExtendedPrice
+    INTO Consolidado.InvoiceLines
+    FROM [sj].WideWorldImporters.Sales.InvoiceLines;
+
+    INSERT INTO Consolidado.InvoiceLines
+        (Sucursal, InvoiceLineID, InvoiceID, StockItemID, Quantity, UnitPrice, TaxAmount,
+         LineProfit, ExtendedPrice)
+    SELECT N'LIMON', InvoiceLineID, InvoiceID, StockItemID, Quantity, UnitPrice, TaxAmount,
+           LineProfit, ExtendedPrice
+    FROM [limon].WideWorldImporters.Sales.InvoiceLines;
+
+    -- Ordenes de compra
+    DROP TABLE IF EXISTS Consolidado.PurchaseOrders;
+    SELECT CAST(N'SJ' AS NVARCHAR(10)) AS Sucursal,
+           PurchaseOrderID, SupplierID, OrderDate, DeliveryMethodID,
+           ExpectedDeliveryDate, IsOrderFinalized
+    INTO Consolidado.PurchaseOrders
+    FROM [sj].WideWorldImporters.Purchasing.PurchaseOrders;
+
+    INSERT INTO Consolidado.PurchaseOrders
+        (Sucursal, PurchaseOrderID, SupplierID, OrderDate, DeliveryMethodID,
+         ExpectedDeliveryDate, IsOrderFinalized)
+    SELECT N'LIMON', PurchaseOrderID, SupplierID, OrderDate, DeliveryMethodID,
+           ExpectedDeliveryDate, IsOrderFinalized
+    FROM [limon].WideWorldImporters.Purchasing.PurchaseOrders;
+
+    -- Lineas de ordenes de compra
+    DROP TABLE IF EXISTS Consolidado.PurchaseOrderLines;
+    SELECT CAST(N'SJ' AS NVARCHAR(10)) AS Sucursal,
+           PurchaseOrderLineID, PurchaseOrderID, StockItemID, OrderedOuters,
+           ReceivedOuters, ExpectedUnitPricePerOuter
+    INTO Consolidado.PurchaseOrderLines
+    FROM [sj].WideWorldImporters.Purchasing.PurchaseOrderLines;
+
+    INSERT INTO Consolidado.PurchaseOrderLines
+        (Sucursal, PurchaseOrderLineID, PurchaseOrderID, StockItemID, OrderedOuters,
+         ReceivedOuters, ExpectedUnitPricePerOuter)
+    SELECT N'LIMON', PurchaseOrderLineID, PurchaseOrderID, StockItemID, OrderedOuters,
+           ReceivedOuters, ExpectedUnitPricePerOuter
+    FROM [limon].WideWorldImporters.Purchasing.PurchaseOrderLines;
+
+    -- Resumen mensual, calculado desde el consolidado
     TRUNCATE TABLE dbo.Estadisticas_Ventas;
 
     INSERT INTO dbo.Estadisticas_Ventas (Sucursal, Anio, Mes, TotalFacturas, TotalVentas)
-    SELECT 'SJ', r.Anio, r.Mes, r.TotalFacturas, r.TotalVentas
-    FROM OPENQUERY([sj], '
-        USE WideWorldImporters;
-        SELECT YEAR(i.InvoiceDate) AS Anio, MONTH(i.InvoiceDate) AS Mes,
-               COUNT(DISTINCT i.InvoiceID) AS TotalFacturas,
-               SUM(il.ExtendedPrice) AS TotalVentas
-        FROM Sales.Invoices i
-        JOIN Sales.InvoiceLines il ON il.InvoiceID = i.InvoiceID
-        GROUP BY YEAR(i.InvoiceDate), MONTH(i.InvoiceDate)
-    ') r;
-
-    INSERT INTO dbo.Estadisticas_Ventas (Sucursal, Anio, Mes, TotalFacturas, TotalVentas)
-    SELECT 'LIMON', r.Anio, r.Mes, r.TotalFacturas, r.TotalVentas
-    FROM OPENQUERY([limon], '
-        USE WideWorldImporters;
-        SELECT YEAR(i.InvoiceDate) AS Anio, MONTH(i.InvoiceDate) AS Mes,
-               COUNT(DISTINCT i.InvoiceID) AS TotalFacturas,
-               SUM(il.ExtendedPrice) AS TotalVentas
-        FROM Sales.Invoices i
-        JOIN Sales.InvoiceLines il ON il.InvoiceID = i.InvoiceID
-        GROUP BY YEAR(i.InvoiceDate), MONTH(i.InvoiceDate)
-    ') r;
+    SELECT i.Sucursal, YEAR(i.InvoiceDate), MONTH(i.InvoiceDate),
+           COUNT(DISTINCT i.InvoiceID), SUM(il.ExtendedPrice)
+    FROM Consolidado.Invoices i
+    JOIN Consolidado.InvoiceLines il
+      ON il.InvoiceID = i.InvoiceID AND il.Sucursal = i.Sucursal
+    GROUP BY i.Sucursal, YEAR(i.InvoiceDate), MONTH(i.InvoiceDate);
 END
 GO
 
-IF OBJECT_ID('Api.usp_Estadisticas_Consultar', 'P') IS NOT NULL
-    DROP PROCEDURE Api.usp_Estadisticas_Consultar;
-GO
-
-CREATE PROCEDURE Api.usp_Estadisticas_Consultar
+-- Consulta del resumen mensual materializado (@Sucursal NULL = consolidado)
+CREATE OR ALTER PROCEDURE Api.usp_Estadisticas_Consultar
     @Sucursal NVARCHAR(10) = NULL
 AS
 BEGIN

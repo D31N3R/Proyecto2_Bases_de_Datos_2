@@ -15,10 +15,18 @@ function normalizar(texto) {
 function resolveNodo(req, res, next) {
   if (PUBLICAS.includes(req.path)) return next();
 
-  const nodo = NODOS[normalizar(req.headers['x-sucursal'])];
+  let nodo = NODOS[normalizar(req.headers['x-sucursal'])];
   if (!nodo) {
     return res.status(400).json({ error: 'Sucursal no indicada o desconocida (header X-Sucursal)' });
   }
+
+  // El Corporativo, en Estadisticas, puede filtrar por sucursal (?sucursal=sj o limon)
+  // o ver la consolidada (cualquier otro valor): esa se consulta en Corp.
+  if (nodo === 'corp' && req.path.startsWith('/estadisticas')) {
+    const filtro = NODOS[normalizar(req.query.sucursal)];
+    if (filtro === 'sj' || filtro === 'limon') nodo = filtro;
+  }
+
   req.nodo = nodo;
   next();
 }

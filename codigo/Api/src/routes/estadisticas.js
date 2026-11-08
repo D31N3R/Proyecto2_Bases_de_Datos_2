@@ -3,6 +3,38 @@ const { getConnection, sql } = require('../db');
 
 const router = express.Router();
 
+// ==================== CONSOLIDADO DEL CORPORATIVO ====================
+// En Corp los reportes leen las tablas Consolidado.* (copia materializada de SJ + Limon).
+// Si estan vacias (primera vez), se llenan solas antes de responder.
+let refrescando = null;
+
+async function refrescarConsolidado() {
+  const pool = await getConnection('corp');
+  await pool.request().execute('Api.usp_Estadisticas_Refrescar');
+}
+
+function asegurarConsolidado() {
+  if (!refrescando) {
+    refrescando = (async () => {
+      const pool = await getConnection('corp');
+      const r = await pool.request().query('SELECT COUNT(*) AS n FROM Consolidado.Invoices');
+      if (r.recordset[0].n === 0) await refrescarConsolidado();
+    })().finally(() => { refrescando = null; });
+  }
+  return refrescando;
+}
+
+router.use('/estadisticas', async (req, res, next) => {
+  // req.nodo es 'corp' solo cuando el Corporativo pidio la consolidada
+  if (req.nodo !== 'corp' || ['/refrescar', '/estado'].includes(req.path)) return next();
+  try {
+    await asegurarConsolidado();
+    next();
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ==================== AUXILIARES ====================
 
 // GET /api/estadisticas/anios-ventas
@@ -228,6 +260,37 @@ router.get('/estadisticas/metodo-envio-favorito', async (req, res) => {
       .input('TamanoPagina', sql.Int, req.query.tamano ? parseInt(req.query.tamano) : 10)
       .execute('Api.usp_Estadisticas_MetodoEnvioFavorito');
     res.json(result.recordset);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==================== CONSOLIDADO: ACTUALIZAR Y ESTADO ====================
+
+// POST /api/estadisticas/refrescar  (solo consolidada): vuelve a copiar los datos de las sucursales
+router.post('/estadisticas/refrescar', async (req, res) => {
+  if (req.nodo !== 'corp') {
+    return res.status(403).json({ error: 'Solo el Corporativo puede actualizar los datos consolidados' });
+  }
+  try {
+    await refrescarConsolidado();
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/estadisticas/estado  (solo consolidada): cuando se actualizo por ultima vez
+router.get('/estadisticas/estado', async (req, res) => {
+  if (req.nodo !== 'corp') {
+    return res.status(403).json({ error: 'Solo disponible para los datos consolidados' });
+  }
+  try {
+    const pool = await getConnection('corp');
+    const r = await pool.request().query(
+      'SELECT MAX(UltimaActualizacion) AS ultimaActualizacion, (SELECT COUNT(*) FROM Consolidado.Invoices) AS facturas FROM dbo.Estadisticas_Ventas'
+    );
+    res.json(r.recordset[0]);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

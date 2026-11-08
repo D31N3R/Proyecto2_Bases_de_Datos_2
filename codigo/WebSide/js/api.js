@@ -24,12 +24,22 @@ function irALogin() {
 
 function cerrarSesion() {
   sessionStorage.removeItem('sesion');
+  sessionStorage.removeItem('sucursalEst');
   irALogin();
 }
 
 function esCorporativo() {
   const s = getSesion();
   return !!s && s.rol === 'Corporativo';
+}
+
+// Sucursal que el Corporativo eligió para las estadísticas: 'consolidada', 'sj' o 'limon'
+function getSucursalEstadisticas() {
+  return sessionStorage.getItem('sucursalEst') || 'consolidada';
+}
+
+function setSucursalEstadisticas(valor) {
+  sessionStorage.setItem('sucursalEst', valor);
 }
 
 // Nodo con el que debe hablar la API para esta sesión: SJ, LIMON o CORP
@@ -94,7 +104,13 @@ async function pedir(metodo, path, body) {
     opciones.body = JSON.stringify(body);
   }
 
-  const res = await fetch(API_URL + path, opciones);
+  // Las estadísticas del Corporativo llevan el filtro de sucursal (o consolidada)
+  let ruta = path;
+  if (esCorporativo() && path.startsWith('/api/estadisticas')) {
+    ruta += (path.includes('?') ? '&' : '?') + 'sucursal=' + encodeURIComponent(getSucursalEstadisticas());
+  }
+
+  const res = await fetch(API_URL + ruta, opciones);
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || `Error ${res.status}`);

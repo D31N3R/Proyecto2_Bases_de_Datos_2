@@ -14,6 +14,7 @@ const configs = {
     user: 'sa',
     password: process.env.DB_PASSWORD || 'Proy2_Str0ng!Pass',
     options: baseOptions,
+    requestTimeout: 120000,
     pool: { max: 10, min: 0, idleTimeoutMillis: 30000 }
   },
   limon: {
@@ -23,6 +24,7 @@ const configs = {
     user: 'sa',
     password: process.env.DB_PASSWORD || 'Proy2_Str0ng!Pass',
     options: baseOptions,
+    requestTimeout: 120000,
     pool: { max: 10, min: 0, idleTimeoutMillis: 30000 }
   },
   corp: {
@@ -32,12 +34,13 @@ const configs = {
     user: 'sa',
     password: process.env.DB_PASSWORD || 'Proy2_Str0ng!Pass',
     options: baseOptions,
+    requestTimeout: 120000,
     pool: { max: 10, min: 0, idleTimeoutMillis: 30000 }
   }
 };
 
 // nombres aceptados para cada nodo, para no pelear con mayusculas/acentos
-const alias = { sj: 'sj', SJ: 'sj', limon: 'limon', LIMON: 'limon', 'limón': 'limon', corp: 'corp', CORP: 'corp' };
+const alias = { sj: 'sj', limon: 'limon', corp: 'corp' };
 
 const pools = {};
 
