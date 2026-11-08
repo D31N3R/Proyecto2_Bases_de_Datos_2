@@ -3,17 +3,45 @@ GO
 
 /* ============================================================
    TABLA DE USUARIOS (solo Corp)
-   Password almacenada como HASHBYTES SHA2_256 + salt aleatorio
-   Esta es la forma correcta en SQL Server: no se "encripta" la
-   contraseña (reversible), se hashea (irreversible) con salt único
-   por usuario para evitar rainbow tables.
+
+   La columna de contraseña (password_enc) esta ENCRIPTADA con los
+   servicios de cifrado nativos de SQL Server:
+
+     clave maestra de la base (DMK)
+        -> certificado (Cert_Users)
+           -> llave simetrica AES-256 (SK_Users)
+
+   Lo que se cifra es el hash SHA2_256 de (sal + contraseña): la
+   contraseña nunca se guarda en claro ni de forma reversible, y el
+   hash guardado ademas esta cifrado. Se usa el username como
+   "authenticator", asi un valor cifrado no sirve en otra fila.
    ============================================================ */
+
+-- Servicios de cifrado: clave maestra -> certificado -> llave simetrica AES-256
+IF NOT EXISTS (SELECT 1 FROM sys.symmetric_keys WHERE name = '##MS_DatabaseMasterKey##')
+    CREATE MASTER KEY ENCRYPTION BY PASSWORD = 'Proy2_Master!Key_2026';
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.certificates WHERE name = 'Cert_Users')
+    CREATE CERTIFICATE Cert_Users WITH SUBJECT = 'Cifrado de contrasenas de usuarios';
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.symmetric_keys WHERE name = 'SK_Users')
+    CREATE SYMMETRIC KEY SK_Users
+        WITH ALGORITHM = AES_256
+        ENCRYPTION BY CERTIFICATE Cert_Users;
+GO
+
+-- Version anterior (hash sin cifrar): se recrea la tabla y se vuelven a sembrar los usuarios
+IF OBJECT_ID('Users') IS NOT NULL AND COL_LENGTH('Users', 'password_enc') IS NULL
+    DROP TABLE Users;
+GO
 
 IF OBJECT_ID('Users') IS NULL
 CREATE TABLE Users (
     iduser        INT IDENTITY(1,1) PRIMARY KEY,
     username      NVARCHAR(50)  NOT NULL UNIQUE,
-    password_hash VARBINARY(32) NOT NULL,
+    password_enc  VARBINARY(MAX) NOT NULL,   -- hash de la contraseña, cifrado con AES-256
     password_salt VARBINARY(16) NOT NULL,
     fullname      NVARCHAR(100) NOT NULL,
     email         NVARCHAR(256) NULL,
@@ -83,10 +111,18 @@ BEGIN
     DECLARE @hash VARBINARY(32) = HASHBYTES('SHA2_256',
         @salt + CAST(@password AS VARBINARY(MAX)));
 
+    IF NOT EXISTS (SELECT 1 FROM sys.openkeys WHERE key_name = 'SK_Users')
+        OPEN SYMMETRIC KEY SK_Users DECRYPTION BY CERTIFICATE Cert_Users;
+
     INSERT INTO Users
-        (username, password_hash, password_salt, fullname, email, rol, sucursal, hiredate)
+        (username, password_enc, password_salt, fullname, email, rol, sucursal, hiredate)
     VALUES
-        (@username, @hash, @salt, @fullname, @email, @rol, @sucursal, @hiredate);
+        (@username,
+         ENCRYPTBYKEY(KEY_GUID('SK_Users'), @hash, 1, CAST(@username AS NVARCHAR(50))),
+         @salt, @fullname, @email, @rol, @sucursal, @hiredate);
+
+    IF EXISTS (SELECT 1 FROM sys.openkeys WHERE key_name = 'SK_Users')
+        CLOSE SYMMETRIC KEY SK_Users;
 END
 GO
 
@@ -105,11 +141,13 @@ BEGIN
     SET NOCOUNT ON;
 
     DECLARE @salt VARBINARY(16);
-    DECLARE @hashGuardado VARBINARY(32);
+    DECLARE @cifrado VARBINARY(MAX);
+    DECLARE @usuarioBD NVARCHAR(50);
     DECLARE @iduser INT;
 
     SELECT @salt = password_salt,
-           @hashGuardado = password_hash,
+           @cifrado = password_enc,
+           @usuarioBD = username,
            @iduser = iduser
     FROM Users
     WHERE username = @username AND active = 1;
@@ -121,6 +159,14 @@ BEGIN
                NULL AS rol, NULL AS sucursal, 'Usuario o contraseña incorrectos' AS mensaje;
         RETURN;
     END
+
+    -- Descifrar el hash guardado (el authenticator es el username tal como esta en la tabla)
+    IF NOT EXISTS (SELECT 1 FROM sys.openkeys WHERE key_name = 'SK_Users')
+        OPEN SYMMETRIC KEY SK_Users DECRYPTION BY CERTIFICATE Cert_Users;
+    DECLARE @hashGuardado VARBINARY(32) =
+        CAST(DECRYPTBYKEY(@cifrado, 1, CAST(@usuarioBD AS NVARCHAR(50))) AS VARBINARY(32));
+    IF EXISTS (SELECT 1 FROM sys.openkeys WHERE key_name = 'SK_Users')
+        CLOSE SYMMETRIC KEY SK_Users;
 
     DECLARE @hashIngresado VARBINARY(32) = HASHBYTES('SHA2_256',
         @salt + CAST(@password AS VARBINARY(MAX)));
@@ -154,28 +200,42 @@ BEGIN
     SET NOCOUNT ON;
 
     -- Verificar que la contraseña actual es correcta (reutiliza la lógica del login)
-    DECLARE @salt VARBINARY(16), @hashGuardado VARBINARY(32);
+    DECLARE @salt VARBINARY(16), @cifrado VARBINARY(MAX), @usuarioBD NVARCHAR(50);
 
-    SELECT @salt = password_salt, @hashGuardado = password_hash
+    SELECT @salt = password_salt, @cifrado = password_enc, @usuarioBD = username
     FROM Users WHERE username = @username AND active = 1;
 
     IF @salt IS NULL
         THROW 51004, 'Usuario no existe o está inactivo.', 1;
 
+    IF NOT EXISTS (SELECT 1 FROM sys.openkeys WHERE key_name = 'SK_Users')
+        OPEN SYMMETRIC KEY SK_Users DECRYPTION BY CERTIFICATE Cert_Users;
+
+    DECLARE @hashGuardado VARBINARY(32) =
+        CAST(DECRYPTBYKEY(@cifrado, 1, CAST(@usuarioBD AS NVARCHAR(50))) AS VARBINARY(32));
+
     DECLARE @hashActual VARBINARY(32) = HASHBYTES('SHA2_256',
         @salt + CAST(@passwordActual AS VARBINARY(MAX)));
 
-    IF @hashActual <> @hashGuardado
+    IF @hashGuardado IS NULL OR @hashActual <> @hashGuardado
+    BEGIN
+        IF EXISTS (SELECT 1 FROM sys.openkeys WHERE key_name = 'SK_Users')
+            CLOSE SYMMETRIC KEY SK_Users;
         THROW 51005, 'La contraseña actual es incorrecta.', 1;
+    END
 
-    -- Generar nuevo salt y hash
+    -- Generar nuevo salt y hash, y guardarlo cifrado
     DECLARE @saltNuevo VARBINARY(16) = CRYPT_GEN_RANDOM(16);
     DECLARE @hashNuevo VARBINARY(32) = HASHBYTES('SHA2_256',
         @saltNuevo + CAST(@passwordNueva AS VARBINARY(MAX)));
 
     UPDATE Users
-    SET password_hash = @hashNuevo, password_salt = @saltNuevo
+    SET password_enc = ENCRYPTBYKEY(KEY_GUID('SK_Users'), @hashNuevo, 1, CAST(@usuarioBD AS NVARCHAR(50))),
+        password_salt = @saltNuevo
     WHERE username = @username;
+
+    IF EXISTS (SELECT 1 FROM sys.openkeys WHERE key_name = 'SK_Users')
+        CLOSE SYMMETRIC KEY SK_Users;
 END
 GO
 
