@@ -255,6 +255,72 @@ EXEC Api.usp_Inventario_Crear @StockItemName = N'NO_DEBE_CREARSE', @SupplierID =
 done
 
 echo
+echo "=== 9. Concurrencia y borrado de productos ==="
+CPROD="ZZ_CONC_$(date +%s)"
+CID=$(docker exec -i nodo_corp "$SQLCMD" -S localhost -U sa -P "$SA" -C -I -d "$DB" -h -1 -W -Q "
+SET NOCOUNT ON;
+DECLARE @s INT = (SELECT MIN(SupplierID) FROM Purchasing.Suppliers),
+        @p INT = (SELECT MIN(PackageTypeID) FROM Warehouse.PackageTypes),
+        @g INT = (SELECT MIN(StockGroupID) FROM Warehouse.StockGroups), @id INT;
+EXEC Api.usp_Inventario_Crear @StockItemName = N'$CPROD', @SupplierID = @s, @UnitPackageID = @p,
+     @OuterPackageID = @p, @QuantityPerOuter = 1, @TaxRate = 15, @UnitPrice = 10,
+     @TypicalWeightPerUnit = 0.1, @StockGroupID = @g, @BinLocation = N'TEST-01', @NuevoStockItemID = @id OUTPUT;
+SELECT @id;" 2>&1 | grep -E '^[0-9]+$' | tail -1)
+
+if [ -z "$CID" ]; then
+  bad "No se pudo crear el producto de prueba para la concurrencia"
+else
+  # Dos editores con la misma version: el primero guarda, el segundo debe ser rechazado
+  MODIF=$(docker exec -i nodo_corp "$SQLCMD" -S localhost -U sa -P "$SA" -C -I -d "$DB" -h -1 -W -Q "
+DECLARE @v VARCHAR(27) = (SELECT CONVERT(VARCHAR(27), ValidFrom, 121) FROM Warehouse.StockItems WHERE StockItemID = $CID);
+DECLARE @s INT, @u INT, @o INT, @q INT, @t DECIMAL(18,3), @p DECIMAL(18,2), @w DECIMAL(18,3);
+SELECT @s = SupplierID, @u = UnitPackageID, @o = OuterPackageID, @q = QuantityPerOuter,
+       @t = TaxRate, @p = UnitPrice, @w = TypicalWeightPerUnit
+FROM Warehouse.StockItems WHERE StockItemID = $CID;
+EXEC Api.usp_Inventario_Modificar @StockItemID = $CID, @StockItemName = N'${CPROD}_A', @SupplierID = @s,
+     @UnitPackageID = @u, @OuterPackageID = @o, @QuantityPerOuter = @q, @TaxRate = @t, @UnitPrice = @p,
+     @TypicalWeightPerUnit = @w, @BinLocation = N'TEST-01', @Version = @v;
+PRINT 'PRIMERA_EDICION_OK';
+EXEC Api.usp_Inventario_Modificar @StockItemID = $CID, @StockItemName = N'${CPROD}_B', @SupplierID = @s,
+     @UnitPackageID = @u, @OuterPackageID = @o, @QuantityPerOuter = @q, @TaxRate = @t, @UnitPrice = @p,
+     @TypicalWeightPerUnit = @w, @BinLocation = N'TEST-01', @Version = @v;
+PRINT 'SEGUNDA_EDICION_SIN_ERROR';" 2>&1)
+  if echo "$MODIF" | grep -q "PRIMERA_EDICION_OK"; then ok "Edicion con la version vigente se aplica"; else bad "La primera edicion fallo -> $(echo "$MODIF" | head -3 | tr '\n' ' ')"; fi
+  if echo "$MODIF" | grep -q "50080" && ! echo "$MODIF" | grep -q "SEGUNDA_EDICION_SIN_ERROR"; then ok "Segunda edicion con la version vieja se rechaza (error 50080)"; else bad "La segunda edicion con version vieja NO se rechazo"; fi
+  check_eq "El segundo editor no piso el cambio del primero" "$(sql nodo_corp "SELECT StockItemName FROM Warehouse.StockItems WHERE StockItemID = $CID" | head -1)" "${CPROD}_A"
+
+  # Borrado: el producto tiene una factura en SJ, asi que Corp debe negarse
+  if wait_for nodo_sj "SELECT COUNT(*) FROM Warehouse.StockItems WHERE StockItemID = $CID" "1"; then
+    FAC=$(docker exec -i nodo_sj "$SQLCMD" -S localhost -U sa -P "$SA" -C -I -d "$DB" -h -1 -W -Q "
+SET NOCOUNT ON;
+DECLARE @c INT = (SELECT MIN(CustomerID) FROM Sales.Customers),
+        @v INT = (SELECT MIN(PersonID) FROM Application.People WHERE IsSalesperson = 1), @id INT;
+EXEC Api.usp_Ventas_Crear @CustomerID = @c, @SalespersonPersonID = @v,
+     @InvoiceDate = '$(date -u +%F)',
+     @Lineas = N'[{\"StockItemID\":$CID,\"Quantity\":1}]', @NuevoInvoiceID = @id OUTPUT;
+SELECT @id;" 2>&1 | grep -E '^[0-9]+$' | tail -1)
+    if [ -z "$FAC" ]; then
+      bad "No se pudo crear la factura de prueba en SJ"
+    else
+      E1=$(sql nodo_corp "EXEC Api.usp_Inventario_Eliminar @StockItemID = $CID")
+      if echo "$E1" | grep -q -E "5003[12]"; then ok "Corp rechaza borrar un producto con ventas en una sucursal"; else bad "Corp permitio borrar un producto con ventas en SJ -> $(echo "$E1" | head -2 | tr '\n' ' ')"; fi
+      check_eq "El producto sigue existiendo en Corp" "$(sql_num nodo_corp "SELECT COUNT(*) FROM Warehouse.StockItems WHERE StockItemID = $CID")" "1"
+      sql nodo_sj "DELETE FROM Sales.InvoiceLines WHERE InvoiceID = $FAC; DELETE FROM Sales.Invoices WHERE InvoiceID = $FAC;" > /dev/null
+    fi
+  else
+    bad "El producto de prueba no llego a SJ; se omite la prueba de borrado con ventas"
+  fi
+
+  # Sin ventas, el borrado si procede y se replica a las sucursales
+  E2=$(sql nodo_corp "EXEC Api.usp_Inventario_Eliminar @StockItemID = $CID")
+  if echo "$E2" | grep -q "Msg"; then bad "Eliminar un producto sin ventas fallo -> $(echo "$E2" | head -2 | tr '\n' ' ')"; else ok "Corp elimina un producto sin ventas"; fi
+  for n in nodo_sj nodo_limon; do
+    if wait_for $n "SELECT COUNT(*) FROM Warehouse.StockItems WHERE StockItemID = $CID" "0"; then ok "El borrado llego a $n"; else bad "El borrado NO llego a $n en 90 s"; fi
+  done
+fi
+
+
+echo
 echo "=========================================="
 echo "  OK: $PASS    FALLAS: $FAIL"
 echo "=========================================="

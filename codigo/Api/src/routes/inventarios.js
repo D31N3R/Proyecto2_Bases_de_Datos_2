@@ -126,11 +126,13 @@ router.put('/inventarios/:id', async (req, res) => {
       .input('Brand', sql.NVarChar(50), aNull(b.marca))
       .input('Size', sql.NVarChar(20), aNull(b.talla))
       .input('RecommendedRetailPrice', sql.Decimal(18, 2), aNull(b.precioVenta))
-      .input('QuantityOnHand', sql.Int, aNull(b.cantidad) ?? 0)
+            .input('QuantityOnHand', sql.Int, aNull(b.cantidad) ?? 0)
+      .input('Version', sql.VarChar(27), aNull(b.version))
       .execute('Api.usp_Inventario_Modificar');
     res.json({ ok: true });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    // 50080 = otro usuario modifico el producto despues de que se cargo el formulario
+    res.status(error.number === 50080 ? 409 : 500).json({ error: error.message });
   }
 });
 

@@ -134,7 +134,8 @@ BEGIN
         si.TypicalWeightPerUnit AS Peso,
         REPLACE(si.SearchDetails, ' ', ', ') AS PalabrasClaves,
         ISNULL(sih.QuantityOnHand, 0) AS CantidadDisponible,
-        sih.BinLocation AS Ubicacion
+        sih.BinLocation AS Ubicacion,
+        CONVERT(VARCHAR(27), si.ValidFrom, 121) AS Version
     FROM Syn.StockItems si
     LEFT JOIN Syn.Suppliers sup ON sup.SupplierID = si.SupplierID
     LEFT JOIN Syn.Colors col ON col.ColorID = si.ColorID
@@ -277,7 +278,8 @@ CREATE OR ALTER PROCEDURE Api.usp_Inventario_Modificar
     @Brand NVARCHAR(50) = NULL,
     @Size NVARCHAR(20) = NULL,
     @RecommendedRetailPrice DECIMAL(18,2) = NULL,
-    @QuantityOnHand INT = 0
+    @QuantityOnHand INT = 0,
+    @Version VARCHAR(27) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -313,8 +315,14 @@ BEGIN
             UnitPrice = @UnitPrice,
             RecommendedRetailPrice = @RecommendedRetailPrice,
             TypicalWeightPerUnit = @TypicalWeightPerUnit,
-            LastEditedBy = @SistemaPersonID
-        WHERE StockItemID = @StockItemID;
+            LastEditedBy = @SistemaPersonID,
+            ValidFrom = SYSUTCDATETIME()      -- cambia la version: quien tenia la anterior ya no puede guardar
+        WHERE StockItemID = @StockItemID
+          AND (@Version IS NULL OR CONVERT(VARCHAR(27), ValidFrom, 121) = @Version);
+
+        -- El producto existe (se verifico arriba): si no se actualizo nada, alguien lo cambio antes
+        IF @@ROWCOUNT = 0
+            THROW 50080, 'El producto fue modificado por otro usuario. Recargue los datos antes de guardar.', 1;
 
         UPDATE Syn.StockItemHoldings
         SET QuantityOnHand = @QuantityOnHand,
@@ -341,6 +349,53 @@ BEGIN
     -- El catalogo de productos se edita solo en Corp y se replica a las sucursales
     IF ISNULL((SELECT Nodo FROM dbo.NodoConfig), N'') <> N'CORP'
         THROW 50070, 'El catálogo de productos solo se modifica en el nodo Corporativo; se replica a las sucursales.', 1;
+            -- Las ventas, ordenes y movimientos viven en las sucursales (fragmentacion), no en Corp.
+    -- Hay que revisarlas alla ANTES de borrar: si no, el DELETE replicado fallaria en la
+    -- sucursal y dejaria atascada su replicacion. Va fuera de la transaccion porque una
+    -- transaccion con linked servers pide MSDTC.
+    DECLARE @sucursales TABLE (Servidor SYSNAME, Etiqueta NVARCHAR(10));
+    INSERT @sucursales VALUES (N'sj', N'SJ'), (N'limon', N'Limón');
+
+    DECLARE @tablas TABLE (Esquema SYSNAME, Tabla SYSNAME, Descripcion NVARCHAR(60));
+    INSERT @tablas VALUES (N'Sales', N'OrderLines', N'órdenes de venta'),
+                          (N'Sales', N'InvoiceLines', N'facturas'),
+                          (N'Purchasing', N'PurchaseOrderLines', N'órdenes de compra'),
+                          (N'Warehouse', N'StockItemTransactions', N'movimientos de inventario'),
+                          (N'Sales', N'SpecialDeals', N'ofertas especiales');
+
+    DECLARE @srv SYSNAME, @etq NVARCHAR(10), @esq SYSNAME, @tab SYSNAME, @desc NVARCHAR(60);
+    DECLARE @sqlDin NVARCHAR(MAX), @cnt INT, @msg NVARCHAR(400);
+
+    DECLARE cur_suc CURSOR LOCAL FAST_FORWARD FOR
+        SELECT s.Servidor, s.Etiqueta, t.Esquema, t.Tabla, t.Descripcion
+        FROM @sucursales s CROSS JOIN @tablas t;
+    OPEN cur_suc;
+    FETCH NEXT FROM cur_suc INTO @srv, @etq, @esq, @tab, @desc;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        SET @cnt = NULL;
+        SET @sqlDin = N'SELECT @n = COUNT(*) FROM ' + QUOTENAME(@srv) + N'.WideWorldImporters.'
+                    + QUOTENAME(@esq) + N'.' + QUOTENAME(@tab) + N' WHERE StockItemID = @id';
+        BEGIN TRY
+            EXEC sp_executesql @sqlDin, N'@id INT, @n INT OUTPUT', @id = @StockItemID, @n = @cnt OUTPUT;
+        END TRY
+        BEGIN CATCH
+            CLOSE cur_suc; DEALLOCATE cur_suc;
+            SET @msg = CONCAT(N'No se puede verificar si el producto tiene ventas: la sucursal ', @etq,
+                              N' no responde (', ERROR_MESSAGE(), N'). Intente más tarde.');
+            THROW 50031, @msg, 1;
+        END CATCH
+
+        IF @cnt > 0
+        BEGIN
+            CLOSE cur_suc; DEALLOCATE cur_suc;
+            SET @msg = CONCAT(N'No se puede eliminar: el producto tiene ', @desc, N' en la sucursal ', @etq, N'.');
+            THROW 50032, @msg, 1;
+        END
+
+        FETCH NEXT FROM cur_suc INTO @srv, @etq, @esq, @tab, @desc;
+    END
+    CLOSE cur_suc; DEALLOCATE cur_suc;
     SET XACT_ABORT ON;
     BEGIN TRY
         BEGIN TRANSACTION;

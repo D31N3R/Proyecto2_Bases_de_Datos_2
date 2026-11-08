@@ -1,6 +1,7 @@
 const params = new URLSearchParams(window.location.search);
 const id = params.get('id');
 const esEdicion = !!id;
+let versionProducto = null; // control de concurrencia: version del producto cuando se cargo el formulario
 
 const form = document.getElementById('form-inventario');
 const tituloEl = document.getElementById('titulo');
@@ -55,6 +56,7 @@ async function inicializar() {
       document.getElementById('label-grupo').style.display = 'none';
 
       const p = await apiGet(`/api/inventarios/${id}`);
+      versionProducto = p.Version;
       ponerValor('nombre', p.Nombre);
       ponerValor('marca', p.Marca);
       ponerValor('talla', p.Talla);
@@ -118,6 +120,8 @@ form.addEventListener('submit', async (e) => {
 
   if (!esEdicion) {
     body.grupo = parseInt(selectGrupo.value);
+  } else {
+    body.version = versionProducto;
   }
 
   btnGuardar.disabled = true;

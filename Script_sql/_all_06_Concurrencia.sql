@@ -2,67 +2,40 @@ USE WideWorldImporters;
 GO
 
 /* ============================================================
-   CONCURRENCIA - Control optimista para edicion de productos
-   Basado en Database System Concepts, 18.6 (Validation-Based
-   Protocols): el cliente lee el producto junto con su
-   ValidFrom, y al guardar debe enviar ese mismo valor.
-   Si alguien mas lo modifico mientras tanto, se rechaza el
-   update en vez de sobreescribir en silencio (lost update).
+   CONCURRENCIA
+
+   1. Edicion de productos (catalogo replicado): control OPTIMISTA.
+      Basado en Database System Concepts, 18.6 (protocolos basados en
+      validacion). Api.usp_Inventario_Detalle devuelve una "Version" del
+      producto (su ValidFrom como texto, con los 7 decimales). Al guardar,
+      la aplicacion devuelve esa misma version a Api.usp_Inventario_Modificar,
+      que la compara DENTRO del UPDATE:
+
+          UPDATE ... SET ..., ValidFrom = SYSUTCDATETIME()
+          WHERE StockItemID = @id AND version actual = @Version
+
+      Es una comparacion y cambio atomicos (una sola sentencia): si dos
+      administradores de sucursales distintas editan a la vez, el segundo
+      encuentra otra version, no se actualiza ninguna fila y recibe el error
+      50080 en vez de pisar el cambio del primero (lost update).
+
+   2. Catalogo editable solo en Corp (error 50070 en las sucursales): las
+      modificaciones de todas las sucursales se serializan en un unico punto
+      y luego se replican, asi nunca hay dos copias editandose a la vez.
+
+   3. Borrado de productos: se revisan las ventas de las sucursales antes de
+      borrar (errores 50031 y 50032), para no atascar la replicacion.
+
+   4. Generacion de IDs (facturas, lineas, clientes): UPDLOCK + HOLDLOCK
+      sobre el MAX(ID) para que dos sesiones del mismo nodo no tomen el mismo.
+
+   Aqui antes habia un prototipo (Api.usp_Productos_Actualizar) con un error
+   de sintaxis que nunca llego a crearse; el control optimista quedo integrado
+   en Api.usp_Inventario_Modificar, que es el que usa la aplicacion.
    ============================================================ */
 
-IF OBJECT_ID('Api.usp_Productos_Actualizar', 'P') IS NOT NULL
-    DROP PROCEDURE Api.usp_Productos_Actualizar;
+DROP PROCEDURE IF EXISTS Api.usp_Productos_Actualizar;
 GO
 
-CREATE PROCEDURE Api.usp_Productos_Actualizar
-    @StockItemID INT,
-    @StockItemName NVARCHAR(100),
-    @UnitPrice DECIMAL(18,2),
-    @ValidFromEsperado DATETIME2,
-    @Exito BIT OUTPUT,
-    @Mensaje NVARCHAR(200) OUTPUT
-AS
-BEGIN
-    SET NOCOUNT ON;
-    SET @Exito = 0;
-
-    DECLARE @ActualLastEdited DATETIME2;
-
-    SELECT @ActualLastEdited = ValidFrom
-    FROM Warehouse.StockItems
-    WHERE StockItemID = @StockItemID;
-
-    IF @ActualLastEdited IS NULL
-    BEGIN
-        SET @Mensaje = 'Producto no encontrado';
-        RETURN;
-    END
-
-    IF @ActualLastEdited <> @ValidFromEsperado
-    BEGIN
-        SET @Mensaje = 'El producto fue modificado por otro usuario, recargue los datos antes de guardar';
-        RETURN;
-    END
-
-    UPDATE Warehouse.StockItems
-    SET StockItemName = @StockItemName,
-        UnitPrice = @UnitPrice
-	ValidFrom = SYSDATETIME()
-
-    WHERE StockItemID = @StockItemID
-      AND ValidFrom = @ValidFromEsperado;
-
-    IF @@ROWCOUNT = 1
-    BEGIN
-        SET @Exito = 1;
-        SET @Mensaje = 'Actualizado correctamente';
-    END
-    ELSE
-    BEGIN
-        SET @Mensaje = 'Conflicto de concurrencia, intente de nuevo';
-    END
-END
-GO
-
-PRINT 'Procedure Api.usp_Productos_Actualizar creado';
+PRINT 'Concurrencia: control optimista integrado en Api.usp_Inventario_Modificar (@Version)';
 GO
