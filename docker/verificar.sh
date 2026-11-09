@@ -255,6 +255,17 @@ EXEC Api.usp_Inventario_Crear @StockItemName = N'NO_DEBE_CREARSE', @SupplierID =
 done
 
 echo
+echo "=== 8. Estadisticas consolidadas en Corp ==="
+sql nodo_corp "EXEC Api.usp_Estadisticas_Refrescar" > /dev/null
+SJ_L=$(sql_num nodo_sj 'SELECT COUNT(*) FROM Sales.InvoiceLines')
+LI_L=$(sql_num nodo_limon 'SELECT COUNT(*) FROM Sales.InvoiceLines')
+check_eq "Consolidado.Invoices = facturas de SJ + Limon" "$(sql_num nodo_corp 'SELECT COUNT(*) FROM Consolidado.Invoices')" "$((SJ_INV + LI_INV))"
+check_eq "Consolidado.InvoiceLines = lineas de SJ + Limon" "$(sql_num nodo_corp 'SELECT COUNT(*) FROM Consolidado.InvoiceLines')" "$((SJ_L + LI_L))"
+check_eq "Resumen mensual: facturas de SJ" "$(sql_num nodo_corp "SELECT SUM(TotalFacturas) FROM dbo.Estadisticas_Ventas WHERE Sucursal = 'SJ'")" "$SJ_INV"
+check_eq "Resumen mensual: facturas de Limon" "$(sql_num nodo_corp "SELECT SUM(TotalFacturas) FROM dbo.Estadisticas_Ventas WHERE Sucursal = 'LIMON'")" "$LI_INV"
+check_gt0 "Reporte consolidado en Corp devuelve anios" "$(sql nodo_corp 'EXEC Api.usp_Estadisticas_AniosVentas' | grep -c -E '^[0-9]{4}$')"
+
+echo
 echo "=== 9. Concurrencia y borrado de productos ==="
 CPROD="ZZ_CONC_$(date +%s)"
 CID=$(docker exec -i nodo_corp "$SQLCMD" -S localhost -U sa -P "$SA" -C -I -d "$DB" -h -1 -W -Q "
@@ -319,6 +330,61 @@ SELECT @id;" 2>&1 | grep -E '^[0-9]+$' | tail -1)
   done
 fi
 
+echo
+echo "=== 10. IDs de clientes y proveedores nuevos respetan la paridad ==="
+crear_cliente() {  # nodo nombre -> imprime el ID creado
+  docker exec -i "$1" "$SQLCMD" -S localhost -U sa -P "$SA" -C -I -d "$DB" -h -1 -W -Q "
+SET NOCOUNT ON;
+DECLARE @cat INT = (SELECT MIN(CustomerCategoryID) FROM Sales.CustomerCategories),
+        @met INT = (SELECT MIN(DeliveryMethodID) FROM Application.DeliveryMethods),
+        @per INT = (SELECT MIN(PersonID) FROM Application.People),
+        @ciu INT = (SELECT MIN(CityID) FROM Application.Cities), @id INT;
+EXEC Api.usp_Clientes_Crear @CustomerName = N'$2', @CustomerCategoryID = @cat, @DeliveryMethodID = @met,
+     @PrimaryContactPersonID = @per, @PaymentDays = 7, @PhoneNumber = N'', @FaxNumber = N'', @WebsiteURL = N'',
+     @DeliveryAddressLine1 = N'x', @DeliveryCityID = @ciu, @DeliveryPostalCode = N'0', @PostalAddressLine1 = N'x',
+     @NuevoCustomerID = @id OUTPUT;
+SELECT @id;" 2>&1
+}
+crear_proveedor() {  # nodo nombre -> imprime el ID creado
+  docker exec -i "$1" "$SQLCMD" -S localhost -U sa -P "$SA" -C -I -d "$DB" -h -1 -W -Q "
+SET NOCOUNT ON;
+DECLARE @cat INT = (SELECT MIN(SupplierCategoryID) FROM Purchasing.SupplierCategories),
+        @per INT = (SELECT MIN(PersonID) FROM Application.People),
+        @ciu INT = (SELECT MIN(CityID) FROM Application.Cities), @id INT;
+EXEC Api.usp_Proveedores_Crear @SupplierName = N'$2', @SupplierCategoryID = @cat,
+     @PrimaryContactPersonID = @per, @AlternateContactPersonID = @per, @PaymentDays = 7,
+     @PhoneNumber = N'', @FaxNumber = N'', @WebsiteURL = N'',
+     @DeliveryAddressLine1 = N'x', @DeliveryCityID = @ciu, @DeliveryPostalCode = N'0', @PostalAddressLine1 = N'x',
+     @NuevoSupplierID = @id OUTPUT;
+SELECT @id;" 2>&1
+}
+TAGP="ZZ_$(date +%s)"
+declare -A CID_N SID_N
+for par in "nodo_sj:0:SJ" "nodo_limon:1:Limon"; do
+  IFS=: read nodo p etq <<< "$par"
+  C=$(crear_cliente "$nodo" "${TAGP}_CLI_$etq" | grep -E '^[0-9]+$' | tail -1)
+  if [ -z "$C" ]; then bad "$etq: no se pudo crear el cliente de prueba"; else
+    CID_N[$nodo]=$C
+    check_eq "$etq: cliente nuevo $C tiene la paridad del nodo" "$((C % 2))" "$p"
+    sql "$nodo" "DELETE FROM Sales.Customers WHERE CustomerID = $C" > /dev/null
+  fi
+  S=$(crear_proveedor "$nodo" "${TAGP}_PRV_$etq" | grep -E '^[0-9]+$' | tail -1)
+  if [ -z "$S" ]; then bad "$etq: no se pudo crear el proveedor de prueba"; else
+    SID_N[$nodo]=$S
+    check_eq "$etq: proveedor nuevo $S tiene la paridad del nodo" "$((S % 2))" "$p"
+    sql "$nodo" "DELETE FROM Purchasing.Suppliers WHERE SupplierID = $S" > /dev/null
+  fi
+done
+if [ -n "${CID_N[nodo_sj]}" ] && [ -n "${CID_N[nodo_limon]}" ]; then
+  if [ "${CID_N[nodo_sj]}" != "${CID_N[nodo_limon]}" ]; then ok "Sin IDs de cliente repetidos entre SJ y Limon"; else bad "IDs de cliente repetidos entre SJ y Limon"; fi
+fi
+if [ -n "${SID_N[nodo_sj]}" ] && [ -n "${SID_N[nodo_limon]}" ]; then
+  if [ "${SID_N[nodo_sj]}" != "${SID_N[nodo_limon]}" ]; then ok "Sin IDs de proveedor repetidos entre SJ y Limon"; else bad "IDs de proveedor repetidos entre SJ y Limon"; fi
+fi
+R=$(crear_cliente nodo_corp "${TAGP}_CLI_CORP")
+if echo "$R" | grep -q "50062"; then ok "Corp rechaza dar de alta clientes (error 50062)"; else bad "Corp permitio crear un cliente"; fi
+R=$(crear_proveedor nodo_corp "${TAGP}_PRV_CORP")
+if echo "$R" | grep -q "50063"; then ok "Corp rechaza dar de alta proveedores (error 50063)"; else bad "Corp permitio crear un proveedor"; fi
 
 echo
 echo "=========================================="

@@ -229,7 +229,16 @@ BEGIN
             THROW 50034, 'El cliente por facturar no existe.', 1;
 
         DECLARE @SistemaPersonID INT = (SELECT MIN(PersonID) FROM Syn.People);
-        DECLARE @NextID INT = (SELECT ISNULL(MAX(CustomerID), 0) + 1 FROM Syn.Customers);
+        
+        -- Fragmentacion: SJ genera IDs pares y Limon impares (igual que las facturas), asi un
+        -- cliente nuevo nunca repite el ID de otro creado en la otra sucursal.
+        DECLARE @ParidadNodo TINYINT = (SELECT Paridad FROM dbo.NodoConfig);
+        IF @ParidadNodo IS NULL
+            THROW 50062, 'Este nodo no da de alta clientes: solo las sucursales (SJ y Limón) lo hacen.', 1;
+
+        -- UPDLOCK + HOLDLOCK: dos altas simultaneas en el mismo nodo no toman el mismo ID
+        DECLARE @NextID INT = (SELECT ISNULL(MAX(CustomerID), 0) + 1 FROM Syn.Customers WITH (UPDLOCK, HOLDLOCK));
+        IF @NextID % 2 <> @ParidadNodo SET @NextID += 1;
 
         INSERT INTO Syn.Customers (
             CustomerID, CustomerName, BillToCustomerID, CustomerCategoryID, BuyingGroupID,
