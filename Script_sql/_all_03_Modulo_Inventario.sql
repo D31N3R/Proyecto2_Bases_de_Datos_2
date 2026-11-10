@@ -234,16 +234,8 @@ BEGIN
             @TypicalWeightPerUnit, @SistemaPersonID
         );
 
-        INSERT INTO Syn.StockItemHoldings (
-            StockItemID, QuantityOnHand, BinLocation,
-            LastStocktakeQuantity, LastCostPrice,
-            ReorderLevel, TargetStockLevel, LastEditedBy
-        )
-        VALUES (
-            @NextItemID, @QuantityOnHand, @BinLocation,
-            @QuantityOnHand, @UnitPrice,
-            0, 0, @SistemaPersonID
-        );
+        -- Corp solo guarda el catalogo: la cantidad y la ubicacion (@QuantityOnHand, @BinLocation)
+        -- son inventario de cada sucursal y se guardan con Api.usp_Inventario_AjustarCantidad.
 
         INSERT INTO Syn.StockItemStockGroups (
             StockItemStockGroupID, StockItemID, StockGroupID, LastEditedBy
@@ -324,11 +316,7 @@ BEGIN
         IF @@ROWCOUNT = 0
             THROW 50080, 'El producto fue modificado por otro usuario. Recargue los datos antes de guardar.', 1;
 
-        UPDATE Syn.StockItemHoldings
-        SET QuantityOnHand = @QuantityOnHand,
-            BinLocation = @BinLocation,
-            LastEditedBy = @SistemaPersonID
-        WHERE StockItemID = @StockItemID;
+        -- La cantidad y la ubicacion son inventario de la sucursal: ver Api.usp_Inventario_AjustarCantidad
 
         COMMIT TRANSACTION;
     END TRY
@@ -421,6 +409,60 @@ BEGIN
         DELETE FROM Syn.StockItemHoldings WHERE StockItemID = @StockItemID;
         DELETE FROM Syn.StockItemStockGroups WHERE StockItemID = @StockItemID;
         DELETE FROM Syn.StockItems WHERE StockItemID = @StockItemID;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END
+GO
+
+-- Inventario propio de cada sucursal: cantidad y ubicacion de un producto del catalogo.
+-- Si la sucursal todavia no tiene fila para el producto, la crea.
+-- Corp no lo usa: no guarda inventario.
+CREATE OR ALTER PROCEDURE Api.usp_Inventario_AjustarCantidad
+    @StockItemID INT,
+    @QuantityOnHand INT,
+    @BinLocation NVARCHAR(20)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF ISNULL((SELECT Nodo FROM dbo.NodoConfig), N'') = N'CORP'
+        THROW 50071, 'El inventario lo maneja cada sucursal; el nodo Corporativo no guarda cantidades.', 1;
+    IF @QuantityOnHand < 0
+        THROW 50072, 'La cantidad no puede ser negativa.', 1;
+
+    SET XACT_ABORT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- Un producto recien creado en Corp puede tardar unos segundos en replicarse aqui
+        DECLARE @UnitPrice DECIMAL(18,2) = (SELECT UnitPrice FROM Syn.StockItems WHERE StockItemID = @StockItemID);
+        IF @UnitPrice IS NULL
+            THROW 50073, 'El producto todavía no existe en esta sucursal (replicación pendiente).', 1;
+
+        DECLARE @SistemaPersonID INT = (SELECT MIN(PersonID) FROM Syn.People);
+
+        -- UPDLOCK + HOLDLOCK: dos ajustes a la vez no intentan insertar la misma fila dos veces
+        UPDATE Syn.StockItemHoldings WITH (UPDLOCK, HOLDLOCK)
+        SET QuantityOnHand = @QuantityOnHand,
+            BinLocation = @BinLocation,
+            LastEditedBy = @SistemaPersonID
+        WHERE StockItemID = @StockItemID;
+
+        IF @@ROWCOUNT = 0
+            INSERT INTO Syn.StockItemHoldings (
+                StockItemID, QuantityOnHand, BinLocation,
+                LastStocktakeQuantity, LastCostPrice,
+                ReorderLevel, TargetStockLevel, LastEditedBy
+            )
+            VALUES (
+                @StockItemID, @QuantityOnHand, @BinLocation,
+                @QuantityOnHand, @UnitPrice,
+                0, 0, @SistemaPersonID
+            );
 
         COMMIT TRANSACTION;
     END TRY

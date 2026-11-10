@@ -5,6 +5,30 @@ const router = express.Router();
 
 const aNull = (v) => (v === '' || v === undefined ? null : v);
 
+// El catalogo (nombre, precio...) vive en Corp, pero la cantidad y la ubicacion son
+// inventario PROPIO de cada sucursal: se guardan en el nodo del usuario logueado.
+// Un producto recien creado en Corp tarda unos segundos en replicarse a la sucursal
+// (error 50073), asi que al crear se reintenta unos segundos.
+async function guardarInventario(nodo, id, b, esperarReplicacion) {
+  if (nodo === 'corp') return; // Corp no guarda inventario
+  const pool = await getConnection(nodo);
+  const intentos = esperarReplicacion ? 10 : 1;
+
+  for (let i = 1; i <= intentos; i++) {
+    try {
+      await pool.request()
+        .input('StockItemID', sql.Int, id)
+        .input('QuantityOnHand', sql.Int, aNull(b.cantidad) ?? 0)
+        .input('BinLocation', sql.NVarChar(20), b.ubicacion)
+        .execute('Api.usp_Inventario_AjustarCantidad');
+      return;
+    } catch (error) {
+      if (error.number !== 50073 || i === intentos) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+}
+
 // Lecturas: van al nodo del usuario logueado (el catalogo es igual en los 3)
 router.get('/inventarios/grupos', async (req, res) => {
   try {
@@ -101,7 +125,17 @@ router.post('/inventarios', async (req, res) => {
       .output('NuevoStockItemID', sql.Int);
 
     const result = await request.execute('Api.usp_Inventario_Crear');
-    res.status(201).json({ StockItemID: result.output.NuevoStockItemID });
+    const id = result.output.NuevoStockItemID;
+
+    try {
+      await guardarInventario(req.nodo, id, b, true);
+    } catch (error) {
+      return res.status(503).json({
+        error: `El producto se creó en el catálogo, pero no se pudo guardar su inventario en esta sucursal (${error.message}). Edítelo para ingresar la cantidad.`
+      });
+    }
+
+    res.status(201).json({ StockItemID: id });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -129,6 +163,15 @@ router.put('/inventarios/:id', async (req, res) => {
             .input('QuantityOnHand', sql.Int, aNull(b.cantidad) ?? 0)
       .input('Version', sql.VarChar(27), aNull(b.version))
       .execute('Api.usp_Inventario_Modificar');
+
+    try {
+      await guardarInventario(req.nodo, req.params.id, b, false);
+    } catch (error) {
+      return res.status(503).json({
+        error: `El producto se actualizó, pero no se pudo guardar su inventario en esta sucursal (${error.message}). Vuelva a guardar.`
+      });
+    }
+
     res.json({ ok: true });
   } catch (error) {
     // 50080 = otro usuario modifico el producto despues de que se cargo el formulario

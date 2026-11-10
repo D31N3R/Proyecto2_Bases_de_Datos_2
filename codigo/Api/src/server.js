@@ -9,6 +9,7 @@ const ventasRouter = require('./routes/ventas');
 const estadisticasRouter = require('./routes/estadisticas');
 const authRouter = require('./routes/auth');
 const resolveNodo = require('./middleware/nodo');
+const { estadoNodos } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -16,8 +17,11 @@ const PORT = process.env.PORT || 4000;
 app.use(cors({ origin: process.env.WEBSIDE_URL || '*' }));
 app.use(express.json());
 
-app.get('/api/status', (req, res) => {
-  res.json({ status: 'activo' });
+// La API siempre responde; "nodos" dice cuales bases de datos estan arriba
+app.get('/api/status', async (req, res) => {
+  const nodos = await estadoNodos();
+  const todosArriba = Object.values(nodos).every((estado) => estado === 'ok');
+  res.json({ status: todosArriba ? 'activo' : 'degradado', nodos });
 });
 
 // El nodo se resuelve ANTES de las rutas (lee el header X-Sucursal).

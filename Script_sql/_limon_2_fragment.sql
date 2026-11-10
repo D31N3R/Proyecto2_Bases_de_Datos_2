@@ -44,8 +44,7 @@ PRINT CONCAT('Limon - PurchaseOrderLines: ', @@ROWCOUNT);
 DELETE FROM Purchasing.PurchaseOrders WHERE PurchaseOrderID % 2 = 0;
 PRINT CONCAT('Limon - PurchaseOrders: ', @@ROWCOUNT);
 
-DELETE FROM Warehouse.StockItemHoldings WHERE StockItemID % 2 = 0;
-PRINT CONCAT('Limon - StockItemHoldings: ', @@ROWCOUNT);
+-- StockItemHoldings NO se fragmenta: cada sucursal guarda el inventario de todos los productos
 
 DELETE FROM Warehouse.StockItemTransactions WHERE StockItemTransactionID % 2 = 0;
 PRINT CONCAT('Limon - StockItemTransactions: ', @@ROWCOUNT);

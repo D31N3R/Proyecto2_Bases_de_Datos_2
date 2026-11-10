@@ -7,18 +7,40 @@ const router = express.Router();
 // En Corp los reportes leen las tablas Consolidado.* (copia materializada de SJ + Limon).
 // Si estan vacias (primera vez), se llenan solas antes de responder.
 let refrescando = null;
+let ultimoRefrescoFallo = false;
+
+// Cada cuantos minutos se vuelve a copiar el consolidado desde las sucursales
+const MINUTOS_CONSOLIDADO = Number(process.env.CONSOLIDADO_MINUTOS || 5);
 
 async function refrescarConsolidado() {
   const pool = await getConnection('corp');
   await pool.request().execute('Api.usp_Estadisticas_Refrescar');
+  ultimoRefrescoFallo = false;
 }
 
+// Primera vez (vacio): se llena y se espera. Despues, si la copia tiene mas de
+// MINUTOS_CONSOLIDADO minutos se vuelve a llenar; si una sucursal no responde,
+// Corp sigue contestando con la ultima copia (queda marcada como desactualizada).
 function asegurarConsolidado() {
   if (!refrescando) {
     refrescando = (async () => {
       const pool = await getConnection('corp');
-      const r = await pool.request().query('SELECT COUNT(*) AS n FROM Consolidado.Invoices');
-      if (r.recordset[0].n === 0) await refrescarConsolidado();
+      const r = await pool.request().query(
+        `SELECT (SELECT COUNT(*) FROM Consolidado.Invoices) AS n,
+                (SELECT DATEDIFF(MINUTE, MAX(UltimaActualizacion), SYSDATETIME()) FROM dbo.Estadisticas_Ventas) AS minutos`
+      );
+      const { n, minutos } = r.recordset[0];
+
+      if (n === 0) {
+        await refrescarConsolidado(); // no hay nada que mostrar: aqui si hay que esperar y fallar
+      } else if (minutos === null || minutos >= MINUTOS_CONSOLIDADO) {
+        try {
+          await refrescarConsolidado();
+        } catch (error) {
+          ultimoRefrescoFallo = true;
+          console.error('No se pudo actualizar el consolidado, se usa la ultima copia:', error.message);
+        }
+      }
     })().finally(() => { refrescando = null; });
   }
   return refrescando;
@@ -29,6 +51,7 @@ router.use('/estadisticas', async (req, res, next) => {
   if (req.nodo !== 'corp' || ['/refrescar', '/estado'].includes(req.path)) return next();
   try {
     await asegurarConsolidado();
+    if (ultimoRefrescoFallo) res.set('X-Consolidado-Desactualizado', 'true');
     next();
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -290,7 +313,7 @@ router.get('/estadisticas/estado', async (req, res) => {
     const r = await pool.request().query(
       'SELECT MAX(UltimaActualizacion) AS ultimaActualizacion, (SELECT COUNT(*) FROM Consolidado.Invoices) AS facturas FROM dbo.Estadisticas_Ventas'
     );
-    res.json(r.recordset[0]);
+    res.json({ ...r.recordset[0], desactualizado: ultimoRefrescoFallo, minutosEntreActualizaciones: MINUTOS_CONSOLIDADO });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

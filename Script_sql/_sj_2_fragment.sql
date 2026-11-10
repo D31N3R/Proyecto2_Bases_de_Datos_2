@@ -26,7 +26,7 @@ DELETE FROM Sales.OrderLines WHERE OrderID % 2 <> 0;
 DELETE FROM Sales.Orders WHERE OrderID % 2 <> 0;
 DELETE FROM Purchasing.PurchaseOrderLines WHERE PurchaseOrderID % 2 <> 0;
 DELETE FROM Purchasing.PurchaseOrders WHERE PurchaseOrderID % 2 <> 0;
-DELETE FROM Warehouse.StockItemHoldings WHERE StockItemID % 2 <> 0;
+-- StockItemHoldings NO se fragmenta: cada sucursal guarda el inventario de todos los productos
 DELETE FROM Warehouse.StockItemTransactions WHERE StockItemTransactionID % 2 <> 0;
 DELETE FROM Sales.CustomerTransactions WHERE CustomerTransactionID % 2 <> 0;
 DELETE FROM Purchasing.SupplierTransactions WHERE SupplierTransactionID % 2 <> 0;

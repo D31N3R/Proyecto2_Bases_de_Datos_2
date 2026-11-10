@@ -56,6 +56,14 @@ IF OBJECT_ID('Consolidado.PurchaseOrderLines', 'U') IS NULL
     FROM Purchasing.PurchaseOrderLines WHERE 1 = 0;
 GO
 
+-- Existencias de las dos sucursales sumadas (una fila por producto).
+-- Corp no guarda inventario propio: el reporte de rotacion lo necesita en conjunto.
+IF OBJECT_ID('Consolidado.StockItemHoldings', 'U') IS NULL
+    SELECT StockItemID, QuantityOnHand
+    INTO Consolidado.StockItemHoldings
+    FROM Warehouse.StockItemHoldings WHERE 1 = 0;
+GO
+
 -- En Corp, los reportes leen el consolidado
 DROP SYNONYM IF EXISTS Syn.Invoices;
 CREATE SYNONYM Syn.Invoices FOR Consolidado.Invoices;
@@ -65,6 +73,8 @@ DROP SYNONYM IF EXISTS Syn.PurchaseOrders;
 CREATE SYNONYM Syn.PurchaseOrders FOR Consolidado.PurchaseOrders;
 DROP SYNONYM IF EXISTS Syn.PurchaseOrderLines;
 CREATE SYNONYM Syn.PurchaseOrderLines FOR Consolidado.PurchaseOrderLines;
+DROP SYNONYM IF EXISTS Syn.StockItemHoldings;
+CREATE SYNONYM Syn.StockItemHoldings FOR Consolidado.StockItemHoldings;
 GO
 
 -- Resumen mensual materializado (ventas por sucursal, anio y mes)
@@ -149,6 +159,17 @@ BEGIN
     SELECT N'LIMON', PurchaseOrderLineID, PurchaseOrderID, StockItemID, OrderedOuters,
            ReceivedOuters, ExpectedUnitPricePerOuter
     FROM [limon].WideWorldImporters.Purchasing.PurchaseOrderLines;
+
+    -- Existencias: suma de lo que tiene cada sucursal, por producto
+    DROP TABLE IF EXISTS Consolidado.StockItemHoldings;
+    SELECT StockItemID, CAST(SUM(QuantityOnHand) AS INT) AS QuantityOnHand
+    INTO Consolidado.StockItemHoldings
+    FROM (
+        SELECT StockItemID, QuantityOnHand FROM [sj].WideWorldImporters.Warehouse.StockItemHoldings
+        UNION ALL
+        SELECT StockItemID, QuantityOnHand FROM [limon].WideWorldImporters.Warehouse.StockItemHoldings
+    ) AS x
+    GROUP BY StockItemID;
 
     -- Resumen mensual, calculado desde el consolidado
     TRUNCATE TABLE dbo.Estadisticas_Ventas;

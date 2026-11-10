@@ -32,6 +32,32 @@ function agregarCampos(request, body) {
     .input('Longitud', sql.Decimal(9, 6), opcional(body.longitud));
 }
 
+// Teléfono, direcciones y demás datos sensibles se guardan solo en Corp
+async function leerContacto(id) {
+  const corp = await getConnection('corp');
+  const result = await corp.request()
+    .input('CustomerID', sql.Int, id)
+    .execute('Api.usp_ClientesContacto_Obtener');
+  return result.recordset[0] || {};
+}
+
+async function guardarContacto(id, body) {
+  const corp = await getConnection('corp');
+  await corp.request()
+    .input('CustomerID', sql.Int, id)
+    .input('PhoneNumber', sql.NVarChar(20), body.telefono)
+    .input('FaxNumber', sql.NVarChar(20), body.fax)
+    .input('WebsiteURL', sql.NVarChar(256), body.sitioWeb)
+    .input('DeliveryAddressLine1', sql.NVarChar(60), body.direccionEntrega1)
+    .input('DeliveryAddressLine2', sql.NVarChar(60), body.direccionEntrega2 || null)
+    .input('DeliveryPostalCode', sql.NVarChar(10), body.codigoPostal)
+    .input('PostalAddressLine1', sql.NVarChar(60), body.direccionPostal1)
+    .input('PostalAddressLine2', sql.NVarChar(60), body.direccionPostal2 || null)
+    .input('Latitud', sql.Decimal(9, 6), opcional(body.latitud))
+    .input('Longitud', sql.Decimal(9, 6), opcional(body.longitud))
+    .execute('Api.usp_ClientesContacto_Guardar');
+}
+
 // GET /api/clientes/categorias
 router.get('/clientes/categorias', async (req, res) => {
   try {
@@ -95,7 +121,16 @@ router.get('/clientes/:id', async (req, res) => {
     if (result.recordset.length === 0) {
       return res.status(404).json({ error: 'Cliente no encontrado' });
     }
-    res.json(result.recordset[0]);
+
+    const cliente = result.recordset[0];
+    // El contacto viene de Corp; si Corp no responde se muestra el resto de los datos
+    try {
+      Object.assign(cliente, await leerContacto(req.params.id));
+      cliente.contactoDisponible = true;
+    } catch (error) {
+      cliente.contactoDisponible = false;
+    }
+    res.json(cliente);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -109,7 +144,22 @@ router.post('/clientes', async (req, res) => {
       .output('NuevoCustomerID', sql.Int);
 
     const result = await request.execute('Api.usp_Clientes_Crear');
-    res.status(201).json({ CustomerID: result.output.NuevoCustomerID });
+    const id = result.output.NuevoCustomerID;
+
+    try {
+      await guardarContacto(id, req.body);
+    } catch (error) {
+      // Sin contacto en Corp no se deja el cliente: se deshace el alta
+      await pool.request()
+        .input('CustomerID', sql.Int, id)
+        .execute('Api.usp_Clientes_Eliminar')
+        .catch(() => {});
+      return res.status(503).json({
+        error: `No se pudo guardar el contacto en Corp (${error.message}). El cliente no se creó, intente de nuevo.`
+      });
+    }
+
+    res.status(201).json({ CustomerID: id });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -123,6 +173,15 @@ router.put('/clientes/:id', async (req, res) => {
       .input('CustomerID', sql.Int, req.params.id);
 
     await request.execute('Api.usp_Clientes_Modificar');
+
+    try {
+      await guardarContacto(req.params.id, req.body);
+    } catch (error) {
+      return res.status(503).json({
+        error: `Los datos generales se guardaron, pero no el contacto: Corp no respondió (${error.message}). Vuelva a guardar.`
+      });
+    }
+
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -136,7 +195,18 @@ router.delete('/clientes/:id', async (req, res) => {
     await pool.request()
       .input('CustomerID', sql.Int, req.params.id)
       .execute('Api.usp_Clientes_Eliminar');
-      res.json({ ok: true });
+
+    // El contacto de Corp se borra después; si Corp no responde queda sin usar y no estorba
+    try {
+      const corp = await getConnection('corp');
+      await corp.request()
+        .input('CustomerID', sql.Int, req.params.id)
+        .execute('Api.usp_ClientesContacto_Eliminar');
+    } catch (error) {
+      console.error('No se pudo borrar el contacto en Corp:', error.message);
+    }
+
+    res.json({ ok: true });
     } catch (error) {
       res.status(500).json({ error: error.message || 'Error interno al eliminar el cliente' });
   }

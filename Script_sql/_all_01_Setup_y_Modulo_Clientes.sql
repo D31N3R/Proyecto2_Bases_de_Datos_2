@@ -254,11 +254,9 @@ BEGIN
             @PrimaryContactPersonID, @AlternateContactPersonID, @DeliveryMethodID,
             @DeliveryCityID, @DeliveryCityID, CAST(GETDATE() AS DATE), 0,
             0, 0, @PaymentDays,
-            @PhoneNumber, @FaxNumber, @WebsiteURL,
-            @DeliveryAddressLine1, @DeliveryAddressLine2, @DeliveryPostalCode,
-            CASE WHEN @Latitud IS NULL THEN NULL
-                 ELSE geography::Point(@Latitud, @Longitud, 4326) END,
-            @PostalAddressLine1, @PostalAddressLine2, @DeliveryPostalCode, @SistemaPersonID
+            '', '', '',
+            '', '', '', NULL,
+            '', '', '', @SistemaPersonID
         );
 
         SET @NuevoCustomerID = @NextID;
@@ -330,17 +328,7 @@ BEGIN
             PrimaryContactPersonID = @PrimaryContactPersonID,
             AlternateContactPersonID = @AlternateContactPersonID,
             PaymentDays = @PaymentDays,
-            PhoneNumber = @PhoneNumber,
-            FaxNumber = @FaxNumber,
-            WebsiteURL = @WebsiteURL,
-            DeliveryAddressLine1 = @DeliveryAddressLine1,
-            DeliveryAddressLine2 = @DeliveryAddressLine2,
             DeliveryCityID = @DeliveryCityID,
-            DeliveryPostalCode = @DeliveryPostalCode,
-            DeliveryLocation = CASE WHEN @Latitud IS NULL THEN NULL
-                                    ELSE geography::Point(@Latitud, @Longitud, 4326) END,
-            PostalAddressLine1 = @PostalAddressLine1,
-            PostalAddressLine2 = @PostalAddressLine2,
             LastEditedBy = (SELECT MIN(PersonID) FROM Syn.People)
         WHERE CustomerID = @CustomerID;
 

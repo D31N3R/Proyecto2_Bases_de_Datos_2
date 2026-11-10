@@ -146,7 +146,12 @@ BEGIN
             THROW 50037, 'La latitud debe estar entre -90 y 90 y la longitud entre -180 y 180.', 1;
 
         DECLARE @SistemaPersonID INT = (SELECT MIN(PersonID) FROM Syn.People);
-        DECLARE @NextID INT = (SELECT ISNULL(MAX(SupplierID), 0) + 1 FROM Syn.Suppliers);
+        DECLARE @ParidadNodo TINYINT = (SELECT Paridad FROM dbo.NodoConfig);
+        IF @ParidadNodo IS NULL
+            THROW 50063, 'Este nodo no da de alta proveedores: solo las sucursales (SJ y Limón) lo hacen.', 1;
+
+        DECLARE @NextID INT = (SELECT ISNULL(MAX(SupplierID), 0) + 1 FROM Syn.Suppliers WITH (UPDLOCK, HOLDLOCK));
+        IF @NextID % 2 <> @ParidadNodo SET @NextID += 1;
 
         INSERT INTO Syn.Suppliers (
             SupplierID, SupplierName, SupplierCategoryID,
@@ -161,12 +166,10 @@ BEGIN
             @NextID, @SupplierName, @SupplierCategoryID,
             @PrimaryContactPersonID, @AlternateContactPersonID, @DeliveryMethodID,
             @DeliveryCityID, @DeliveryCityID, @SupplierReference,
-            @BankAccountName, @BankAccountNumber, @PaymentDays,
-            @PhoneNumber, @FaxNumber, @WebsiteURL,
-            @DeliveryAddressLine1, @DeliveryAddressLine2, @DeliveryPostalCode,
-            CASE WHEN @Latitud IS NULL THEN NULL
-                 ELSE geography::Point(@Latitud, @Longitud, 4326) END,
-            @PostalAddressLine1, @PostalAddressLine2, @DeliveryPostalCode, @SistemaPersonID
+            '', '', @PaymentDays,
+            '', '', '',
+            '', '', '', NULL,
+            '', '', '', @SistemaPersonID
         );
 
         SET @NuevoSupplierID = @NextID;
@@ -231,22 +234,9 @@ BEGIN
             PrimaryContactPersonID = @PrimaryContactPersonID,
             AlternateContactPersonID = @AlternateContactPersonID,
             PaymentDays = @PaymentDays,
-            PhoneNumber = @PhoneNumber,
-            FaxNumber = @FaxNumber,
-            WebsiteURL = @WebsiteURL,
-            DeliveryAddressLine1 = @DeliveryAddressLine1,
-            DeliveryAddressLine2 = @DeliveryAddressLine2,
             DeliveryCityID = @DeliveryCityID,
-            DeliveryPostalCode = @DeliveryPostalCode,
-            DeliveryLocation = CASE WHEN @Latitud IS NULL THEN NULL
-                                    ELSE geography::Point(@Latitud, @Longitud, 4326) END,
-            PostalAddressLine1 = @PostalAddressLine1,
-            PostalAddressLine2 = @PostalAddressLine2,
-            BankAccountName = @BankAccountName,
-            BankAccountNumber = @BankAccountNumber,
             LastEditedBy = (SELECT MIN(PersonID) FROM Syn.People)
         WHERE SupplierID = @SupplierID;
-
         COMMIT TRANSACTION;
     END TRY
     BEGIN CATCH
