@@ -8,7 +8,7 @@ services:
       MSSQL_SA_PASSWORD: "Proy2_Str0ng!Pass"
       MSSQL_PID: "Developer"
       MSSQL_AGENT_ENABLED: "true"
-      MSSQL_MEMORY_LIMIT_MB: "2000"
+      MSSQL_MEMORY_LIMIT_MB: "1024"
       mem_limit: 1900m
 
 
@@ -29,7 +29,7 @@ services:
       MSSQL_SA_PASSWORD: "Proy2_Str0ng!Pass"
       MSSQL_PID: "Developer"
       MSSQL_AGENT_ENABLED: "true"
-      MSSQL_MEMORY_LIMIT_MB: "2000"
+      MSSQL_MEMORY_LIMIT_MB: "1024"
     ports:
       - "1435:1433"
     volumes:
@@ -47,7 +47,7 @@ services:
       MSSQL_SA_PASSWORD: "Proy2_Str0ng!Pass"
       MSSQL_PID: "Developer"
       MSSQL_AGENT_ENABLED: "true"
-      MSSQL_MEMORY_LIMIT_MB: "2000"
+      MSSQL_MEMORY_LIMIT_MB: "1024"
 
     ports:
       - "1436:1433"

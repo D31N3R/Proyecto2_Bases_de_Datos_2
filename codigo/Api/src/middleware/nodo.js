@@ -1,6 +1,6 @@
-// Resuelve a que nodo conectarse segun el header X-Sucursal que manda el front
-// despues del login ('SJ', 'LIMON' o 'CORP'; se aceptan acentos: 'Limón').
-// Debe montarse ANTES de las rutas. /login y /status no necesitan sucursal.
+// Resuelve a que nodo conectarse segun el usuario del token (lo valida autenticar.js):
+// el Administrador va al nodo de SU sucursal y el Corporativo a Corp. El navegador ya no elige.
+// Debe montarse DESPUES de autenticar y ANTES de las rutas. /login y /status no necesitan nodo.
 const NODOS = { SJ: 'sj', LIMON: 'limon', CORP: 'corp' };
 const PUBLICAS = ['/login', '/status'];
 
@@ -18,9 +18,12 @@ const FALLO_DE_NODO = /Failed to connect|Connection is closed|Connection lost|EC
 function resolveNodo(req, res, next) {
   if (PUBLICAS.includes(req.path)) return next();
 
-  let nodo = NODOS[normalizar(req.headers['x-sucursal'])];
+  const usuario = req.usuario;
+  if (!usuario) return res.status(401).json({ error: 'Sesión no válida o vencida. Inicie sesión de nuevo.' });
+
+  let nodo = usuario.rol === 'Corporativo' ? 'corp' : NODOS[normalizar(usuario.sucursal)];
   if (!nodo) {
-    return res.status(400).json({ error: 'Sucursal no indicada o desconocida (header X-Sucursal)' });
+    return res.status(403).json({ error: 'El usuario no tiene una sucursal asignada.' });
   }
 
   // El Corporativo, en Estadisticas, puede filtrar por sucursal (?sucursal=sj o limon)

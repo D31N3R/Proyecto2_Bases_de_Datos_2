@@ -13,7 +13,8 @@ let ultimoRefrescoFallo = false;
 const MINUTOS_CONSOLIDADO = Number(process.env.CONSOLIDADO_MINUTOS || 5);
 
 async function refrescarConsolidado() {
-  const pool = await getConnection('corp');
+  // El refresco recrea tablas del consolidado: usa la cuenta de servicio "Refresco", no la del usuario
+  const pool = await getConnection('corp', 'Refresco');
   await pool.request().execute('Api.usp_Estadisticas_Refrescar');
   ultimoRefrescoFallo = false;
 }
@@ -24,7 +25,7 @@ async function refrescarConsolidado() {
 function asegurarConsolidado() {
   if (!refrescando) {
     refrescando = (async () => {
-      const pool = await getConnection('corp');
+      const pool = await getConnection('corp', 'Refresco'); // consulta interna sobre las tablas del consolidado
       const r = await pool.request().query(
         `SELECT (SELECT COUNT(*) FROM Consolidado.Invoices) AS n,
                 (SELECT DATEDIFF(MINUTE, MAX(UltimaActualizacion), SYSDATETIME()) FROM dbo.Estadisticas_Ventas) AS minutos`
@@ -309,7 +310,7 @@ router.get('/estadisticas/estado', async (req, res) => {
     return res.status(403).json({ error: 'Solo disponible para los datos consolidados' });
   }
   try {
-    const pool = await getConnection('corp');
+    const pool = await getConnection('corp', 'Refresco');
     const r = await pool.request().query(
       'SELECT MAX(UltimaActualizacion) AS ultimaActualizacion, (SELECT COUNT(*) FROM Consolidado.Invoices) AS facturas FROM dbo.Estadisticas_Ventas'
     );

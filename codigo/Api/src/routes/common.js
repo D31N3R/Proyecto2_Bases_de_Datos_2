@@ -1,5 +1,5 @@
 const express = require('express');
-const { getConnection } = require('../db');
+const { getConnection, contextoUsuario } = require('../db');
 
 const router = express.Router();
 
@@ -46,10 +46,12 @@ router.get('/personas', async (req, res) => {
 });
 
 // Se cargan al arrancar para que la primera persona que abra un formulario no espere
-for (const nodo of ['sj', 'limon', 'corp']) {
-  catalogo(nodo, 'metodos', 'Api.usp_MetodosEntrega_Listar').catch(() => {});
-  catalogo(nodo, 'ciudades', 'Api.usp_Ciudades_Listar').catch(() => {});
-  catalogo(nodo, 'personas', 'Api.usp_Personas_Listar').catch(() => {});
-}
+contextoUsuario.run({ rol: 'Administrador' }, () => {
+  for (const nodo of ['sj', 'limon', 'corp']) {
+    catalogo(nodo, 'metodos', 'Api.usp_MetodosEntrega_Listar').catch(() => {});
+    catalogo(nodo, 'ciudades', 'Api.usp_Ciudades_Listar').catch(() => {});
+    catalogo(nodo, 'personas', 'Api.usp_Personas_Listar').catch(() => {});
+  }
+});
 
 module.exports = router;
