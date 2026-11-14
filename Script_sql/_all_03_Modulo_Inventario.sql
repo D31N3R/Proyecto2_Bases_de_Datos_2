@@ -384,6 +384,39 @@ BEGIN
         FETCH NEXT FROM cur_suc INTO @srv, @etq, @esq, @tab, @desc;
     END
     CLOSE cur_suc; DEALLOCATE cur_suc;
+
+    -- Si alguna sucursal todavia tiene existencias, no se elimina: la llave foranea del inventario
+    -- borra en cascada, asi que se perderia el inventario de esa sucursal.
+    DECLARE cur_stock CURSOR LOCAL FAST_FORWARD FOR SELECT Servidor, Etiqueta FROM @sucursales;
+    OPEN cur_stock;
+    FETCH NEXT FROM cur_stock INTO @srv, @etq;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        SET @cnt = NULL;
+        SET @sqlDin = N'SELECT @n = ISNULL(SUM(QuantityOnHand), 0) FROM ' + QUOTENAME(@srv)
+                    + N'.WideWorldImporters.Warehouse.StockItemHoldings WHERE StockItemID = @id';
+        BEGIN TRY
+            EXEC sp_executesql @sqlDin, N'@id INT, @n INT OUTPUT', @id = @StockItemID, @n = @cnt OUTPUT;
+        END TRY
+        BEGIN CATCH
+            CLOSE cur_stock; DEALLOCATE cur_stock;
+            SET @msg = CONCAT(N'No se puede verificar las existencias del producto: la sucursal ', @etq,
+                              N' no responde (', ERROR_MESSAGE(), N'). Intente más tarde.');
+            THROW 50075, @msg, 1;
+        END CATCH
+
+        IF @cnt > 0
+        BEGIN
+            CLOSE cur_stock; DEALLOCATE cur_stock;
+            SET @msg = CONCAT(N'No se puede eliminar: la sucursal ', @etq, N' todavía tiene ', @cnt,
+                              N' unidades en inventario. Deje la cantidad en 0 antes de eliminarlo.');
+            THROW 50074, @msg, 1;
+        END
+
+        FETCH NEXT FROM cur_stock INTO @srv, @etq;
+    END
+    CLOSE cur_stock; DEALLOCATE cur_stock;
+
     SET XACT_ABORT ON;
     BEGIN TRY
         BEGIN TRANSACTION;

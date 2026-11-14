@@ -67,10 +67,26 @@ BEGIN
 END
 GO
 
-/* Tablas de referencia de producto que tambien se replican: Colors, PackageTypes,
-   StockGroups. Son temporales igual que StockItems, mismo problema, mismo arreglo. */
+/* WWI protege Sales.Customers con seguridad por filas (Row-Level Security: la politica
+   Application.FilterCustomersBySalesTerritoryRole). Esa politica esta ligada a la tabla y no
+   deja modificarla (error 3729). No se usa en este proyecto: la separacion de datos se hace
+   por nodos y por roles. Se elimina antes de quitar el versionado temporal de Customers. */
+DECLARE @pol NVARCHAR(MAX) = N'';
+SELECT @pol += N'DROP SECURITY POLICY ' + QUOTENAME(SCHEMA_NAME(schema_id)) + N'.' + QUOTENAME(name) + N';' + CHAR(10)
+FROM sys.security_policies;
+IF @pol <> N''
+BEGIN
+    EXEC sys.sp_executesql @pol;
+    PRINT 'Politicas de seguridad por filas de WWI eliminadas (impedian modificar Customers)';
+END
+GO
+
+/* Tablas que tambien se replican: Colors, PackageTypes y StockGroups (referencia de producto),
+   y el catalogo de clientes y proveedores (Customers y Suppliers). Son temporales igual que
+   StockItems, mismo problema, mismo arreglo. */
 DECLARE @t TABLE (Esq SYSNAME, Tab SYSNAME);
-INSERT @t VALUES (N'Warehouse', N'Colors'), (N'Warehouse', N'PackageTypes'), (N'Warehouse', N'StockGroups');
+INSERT @t VALUES (N'Warehouse', N'Colors'), (N'Warehouse', N'PackageTypes'), (N'Warehouse', N'StockGroups'),
+                   (N'Sales', N'Customers'), (N'Purchasing', N'Suppliers');
 DECLARE @e SYSNAME, @n SYSNAME, @full NVARCHAR(300), @sql NVARCHAR(MAX);
 DECLARE c CURSOR LOCAL FAST_FORWARD FOR SELECT Esq, Tab FROM @t;
 OPEN c; FETCH NEXT FROM c INTO @e, @n;

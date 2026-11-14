@@ -2,11 +2,11 @@ USE master;
 GO
 
 /* ============================================================
-   REPLICACION - Corp publica Warehouse.StockItems
+   REPLICACION - Corp publica el catalogo: productos, clientes y proveedores
    Corp es su propio distribuidor local y se suscribe por push
    a SJ y Limon (hostnames de la red docker: sj, limon).
 
-   Los suscriptores ya tienen StockItems idéntico (viene del .bak),
+   Los suscriptores ya tienen estas tablas idénticas (vienen del .bak),
    por eso: @pre_creation_cmd = none y sync_type = replication support only.
    ============================================================ */
 
@@ -60,13 +60,17 @@ ELSE
     PRINT 'Corp - publicacion ya existia';
 GO
 
--- Producto y sus tablas relacionadas (el inventario por sucursal, StockItemHoldings, NO se replica)
+-- Catalogo: productos y sus tablas relacionadas, clientes y proveedores.
+-- El inventario por sucursal (StockItemHoldings) NO se replica. Los datos sensibles de clientes y
+-- proveedores tampoco viajan: en Corp estas tablas ya estan saneadas y el contacto vive aparte.
 DECLARE @art TABLE (Esquema SYSNAME, Tabla SYSNAME);
 INSERT @art VALUES (N'Warehouse', N'StockItems'),
                    (N'Warehouse', N'StockItemStockGroups'),
                    (N'Warehouse', N'StockGroups'),
                    (N'Warehouse', N'Colors'),
-                   (N'Warehouse', N'PackageTypes');
+                   (N'Warehouse', N'PackageTypes'),
+                   (N'Sales', N'Customers'),
+                   (N'Purchasing', N'Suppliers');
 DECLARE @e SYSNAME, @t SYSNAME;
 DECLARE ca CURSOR LOCAL FAST_FORWARD FOR SELECT Esquema, Tabla FROM @art;
 OPEN ca; FETCH NEXT FROM ca INTO @e, @t;
@@ -78,6 +82,12 @@ BEGIN
              @source_owner = @e, @source_object = @t,
              @destination_table = @t, @destination_owner = @e,
              @type = N'logbased', @pre_creation_cmd = N'none';
+        -- La columna geography (DeliveryLocation) no se puede replicar con procedimientos personalizados
+        -- (error 206: "image is incompatible with geography") y ademas es dato sensible: no viaja a las sucursales.
+        IF @t IN (N'Customers', N'Suppliers')
+            EXEC sp_articlecolumn @publication = N'Pub_Productos_Corp', @article = @t,
+                 @column = N'DeliveryLocation', @operation = N'drop',
+                 @force_invalidate_snapshot = 1, @force_reinit_subscription = 1;
         PRINT CONCAT('Corp - articulo ', @t, ' agregado');
     END
     ELSE

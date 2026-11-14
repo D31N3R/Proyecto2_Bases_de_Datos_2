@@ -210,6 +210,10 @@ CREATE OR ALTER PROCEDURE Api.usp_Clientes_Crear
 AS
 BEGIN
     SET NOCOUNT ON;
+    -- Los clientes se dan de alta SOLO en Corp y se replican a las sucursales (igual que los productos).
+    IF ISNULL((SELECT Nodo FROM dbo.NodoConfig), N'') <> N'CORP'
+        THROW 50062, 'Los clientes se administran en el nodo Corporativo; se replican a las sucursales.', 1;
+
     SET XACT_ABORT ON;
     BEGIN TRY
         BEGIN TRANSACTION;
@@ -230,15 +234,9 @@ BEGIN
 
         DECLARE @SistemaPersonID INT = (SELECT MIN(PersonID) FROM Syn.People);
         
-        -- Fragmentacion: SJ genera IDs pares y Limon impares (igual que las facturas), asi un
-        -- cliente nuevo nunca repite el ID de otro creado en la otra sucursal.
-        DECLARE @ParidadNodo TINYINT = (SELECT Paridad FROM dbo.NodoConfig);
-        IF @ParidadNodo IS NULL
-            THROW 50062, 'Este nodo no da de alta clientes: solo las sucursales (SJ y Limón) lo hacen.', 1;
-
-        -- UPDLOCK + HOLDLOCK: dos altas simultaneas en el mismo nodo no toman el mismo ID
+        -- Un unico nodo (Corp) asigna los IDs, asi que no hay choques entre sucursales.
+        -- UPDLOCK + HOLDLOCK: dos altas simultaneas no toman el mismo ID
         DECLARE @NextID INT = (SELECT ISNULL(MAX(CustomerID), 0) + 1 FROM Syn.Customers WITH (UPDLOCK, HOLDLOCK));
-        IF @NextID % 2 <> @ParidadNodo SET @NextID += 1;
 
         INSERT INTO Syn.Customers (
             CustomerID, CustomerName, BillToCustomerID, CustomerCategoryID, BuyingGroupID,
@@ -260,6 +258,14 @@ BEGIN
         );
 
         SET @NuevoCustomerID = @NextID;
+
+        -- Telefono, direcciones y demas datos sensibles: solo en Corp, en la misma transaccion
+        EXEC Api.usp_ClientesContacto_Guardar
+            @CustomerID = @NextID, @PhoneNumber = @PhoneNumber, @FaxNumber = @FaxNumber, @WebsiteURL = @WebsiteURL,
+            @DeliveryAddressLine1 = @DeliveryAddressLine1, @DeliveryAddressLine2 = @DeliveryAddressLine2,
+            @DeliveryPostalCode = @DeliveryPostalCode,
+            @PostalAddressLine1 = @PostalAddressLine1, @PostalAddressLine2 = @PostalAddressLine2,
+            @Latitud = @Latitud, @Longitud = @Longitud;
 
         COMMIT TRANSACTION;
     END TRY
@@ -297,6 +303,10 @@ CREATE OR ALTER PROCEDURE Api.usp_Clientes_Modificar
 AS
 BEGIN
     SET NOCOUNT ON;
+    -- Los clientes se modifican SOLO en Corp y se replican a las sucursales (igual que los productos).
+    IF ISNULL((SELECT Nodo FROM dbo.NodoConfig), N'') <> N'CORP'
+        THROW 50062, 'Los clientes se administran en el nodo Corporativo; se replican a las sucursales.', 1;
+
     SET XACT_ABORT ON;
     BEGIN TRY
         BEGIN TRANSACTION;
@@ -332,6 +342,14 @@ BEGIN
             LastEditedBy = (SELECT MIN(PersonID) FROM Syn.People)
         WHERE CustomerID = @CustomerID;
 
+        -- Telefono, direcciones y demas datos sensibles: solo en Corp, en la misma transaccion
+        EXEC Api.usp_ClientesContacto_Guardar
+            @CustomerID = @CustomerID, @PhoneNumber = @PhoneNumber, @FaxNumber = @FaxNumber, @WebsiteURL = @WebsiteURL,
+            @DeliveryAddressLine1 = @DeliveryAddressLine1, @DeliveryAddressLine2 = @DeliveryAddressLine2,
+            @DeliveryPostalCode = @DeliveryPostalCode,
+            @PostalAddressLine1 = @PostalAddressLine1, @PostalAddressLine2 = @PostalAddressLine2,
+            @Latitud = @Latitud, @Longitud = @Longitud;
+
         COMMIT TRANSACTION;
     END TRY
     BEGIN CATCH
@@ -346,34 +364,70 @@ CREATE OR ALTER PROCEDURE Api.usp_Clientes_Eliminar
 AS
 BEGIN
     SET NOCOUNT ON;
+    -- Los clientes se eliminan SOLO en Corp y se replican a las sucursales (igual que los productos).
+    IF ISNULL((SELECT Nodo FROM dbo.NodoConfig), N'') <> N'CORP'
+        THROW 50062, 'Los clientes se administran en el nodo Corporativo; se replican a las sucursales.', 1;
+
+    IF NOT EXISTS (SELECT 1 FROM Syn.Customers WHERE CustomerID = @CustomerID)
+        THROW 50001, 'El cliente no existe.', 1;
+
+    -- Las facturas, ordenes y transacciones viven en las sucursales (fragmentacion), no en Corp.
+    -- Hay que revisarlas alla ANTES de borrar: si no, el DELETE replicado fallaria en la
+    -- sucursal y dejaria atascada su replicacion. Va fuera de la transaccion porque una
+    -- transaccion con linked servers pide MSDTC.
+    DECLARE @sucursales TABLE (Servidor SYSNAME, Etiqueta NVARCHAR(10));
+    INSERT @sucursales VALUES (N'sj', N'SJ'), (N'limon', N'Limón');
+
+    DECLARE @dep TABLE (Esquema SYSNAME, Tabla SYSNAME, Columna SYSNAME, Descripcion NVARCHAR(60));
+    INSERT @dep VALUES (N'Sales', N'CustomerTransactions', N'CustomerID', N'transacciones'),
+                       (N'Warehouse', N'StockItemTransactions', N'CustomerID', N'movimientos de inventario'),
+                       (N'Sales', N'Orders', N'CustomerID', N'órdenes'),
+                       (N'Sales', N'Invoices', N'CustomerID', N'facturas'),
+                       (N'Sales', N'Invoices', N'BillToCustomerID', N'facturas (como facturador)'),
+                       (N'Sales', N'SpecialDeals', N'CustomerID', N'ofertas especiales');
+
+    DECLARE @srv SYSNAME, @etq NVARCHAR(10), @esq SYSNAME, @tab SYSNAME, @col SYSNAME, @desc NVARCHAR(60);
+    DECLARE @sqlDin NVARCHAR(MAX), @cnt INT, @msg NVARCHAR(400);
+
+    DECLARE cur_dep CURSOR LOCAL FAST_FORWARD FOR
+        SELECT s.Servidor, s.Etiqueta, t.Esquema, t.Tabla, t.Columna, t.Descripcion
+        FROM @sucursales s CROSS JOIN @dep t;
+    OPEN cur_dep;
+    FETCH NEXT FROM cur_dep INTO @srv, @etq, @esq, @tab, @col, @desc;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        SET @cnt = NULL;
+        SET @sqlDin = N'SELECT @n = COUNT(*) FROM ' + QUOTENAME(@srv) + N'.WideWorldImporters.'
+                    + QUOTENAME(@esq) + N'.' + QUOTENAME(@tab) + N' WHERE ' + QUOTENAME(@col) + N' = @id';
+        BEGIN TRY
+            EXEC sp_executesql @sqlDin, N'@id INT, @n INT OUTPUT', @id = @CustomerID, @n = @cnt OUTPUT;
+        END TRY
+        BEGIN CATCH
+            CLOSE cur_dep; DEALLOCATE cur_dep;
+            SET @msg = CONCAT(N'No se puede verificar si el cliente tiene movimientos: la sucursal ', @etq,
+                              N' no responde (', ERROR_MESSAGE(), N'). Intente más tarde.');
+            THROW 50075, @msg, 1;
+        END CATCH
+
+        IF @cnt > 0
+        BEGIN
+            CLOSE cur_dep; DEALLOCATE cur_dep;
+            SET @msg = CONCAT(N'No se puede eliminar: el cliente tiene ', @desc, N' en la sucursal ', @etq, N'.');
+            THROW 50005, @msg, 1;
+        END
+
+        FETCH NEXT FROM cur_dep INTO @srv, @etq, @esq, @tab, @col, @desc;
+    END
+    CLOSE cur_dep; DEALLOCATE cur_dep;
+
     SET XACT_ABORT ON;
     BEGIN TRY
         BEGIN TRANSACTION;
 
-        IF NOT EXISTS (SELECT 1 FROM Syn.Customers WHERE CustomerID = @CustomerID)
-            THROW 50001, 'El cliente no existe.', 1;
-
-        IF EXISTS (SELECT 1 FROM Syn.CustomerTransactions WHERE CustomerID = @CustomerID)
-            THROW 50002, 'No se puede eliminar: el cliente tiene transacciones asociadas.', 1;
-
-        IF EXISTS (SELECT 1 FROM Syn.StockItemTransactions WHERE CustomerID = @CustomerID)
-            THROW 50003, 'No se puede eliminar: el cliente tiene movimientos de inventario asociados.', 1;
-
-        IF EXISTS (SELECT 1 FROM Syn.Orders WHERE CustomerID = @CustomerID)
-            THROW 50004, 'No se puede eliminar: el cliente tiene ordenes asociadas.', 1;
-
-        IF EXISTS (SELECT 1 FROM Syn.Invoices WHERE CustomerID = @CustomerID)
-            THROW 50005, 'No se puede eliminar: el cliente tiene facturas asociadas.', 1;
-
-        IF EXISTS (SELECT 1 FROM Syn.Invoices WHERE BillToCustomerID = @CustomerID)
-            THROW 50006, 'No se puede eliminar: el cliente aparece como facturador en facturas.', 1;
-
-        IF EXISTS (SELECT 1 FROM Syn.SpecialDeals WHERE CustomerID = @CustomerID)
-            THROW 50007, 'No se puede eliminar: el cliente tiene ofertas especiales asociadas.', 1;
-
         IF EXISTS (SELECT 1 FROM Syn.Customers WHERE BillToCustomerID = @CustomerID AND CustomerID <> @CustomerID)
             THROW 50008, 'No se puede eliminar: otros clientes facturan a este cliente.', 1;
-        
+
+        DELETE FROM dbo.Customers_Contact WHERE CustomerID = @CustomerID;
         DELETE FROM Syn.Customers WHERE CustomerID = @CustomerID;
 
         COMMIT TRANSACTION;

@@ -131,6 +131,10 @@ CREATE OR ALTER PROCEDURE Api.usp_Proveedores_Crear
 AS
 BEGIN
     SET NOCOUNT ON;
+    -- Los proveedores se dan de alta SOLO en Corp y se replican a las sucursales (igual que los productos).
+    IF ISNULL((SELECT Nodo FROM dbo.NodoConfig), N'') <> N'CORP'
+        THROW 50063, 'Los proveedores se administran en el nodo Corporativo; se replican a las sucursales.', 1;
+
     SET XACT_ABORT ON;
     BEGIN TRY
         BEGIN TRANSACTION;
@@ -146,12 +150,9 @@ BEGIN
             THROW 50037, 'La latitud debe estar entre -90 y 90 y la longitud entre -180 y 180.', 1;
 
         DECLARE @SistemaPersonID INT = (SELECT MIN(PersonID) FROM Syn.People);
-        DECLARE @ParidadNodo TINYINT = (SELECT Paridad FROM dbo.NodoConfig);
-        IF @ParidadNodo IS NULL
-            THROW 50063, 'Este nodo no da de alta proveedores: solo las sucursales (SJ y Limón) lo hacen.', 1;
-
+        -- Un unico nodo (Corp) asigna los IDs, asi que no hay choques entre sucursales.
+        -- UPDLOCK + HOLDLOCK: dos altas simultaneas no toman el mismo ID
         DECLARE @NextID INT = (SELECT ISNULL(MAX(SupplierID), 0) + 1 FROM Syn.Suppliers WITH (UPDLOCK, HOLDLOCK));
-        IF @NextID % 2 <> @ParidadNodo SET @NextID += 1;
 
         INSERT INTO Syn.Suppliers (
             SupplierID, SupplierName, SupplierCategoryID,
@@ -173,6 +174,15 @@ BEGIN
         );
 
         SET @NuevoSupplierID = @NextID;
+
+        -- Telefono, direcciones, datos del banco y demas datos sensibles: solo en Corp, en la misma transaccion
+        EXEC Api.usp_ProveedoresContacto_Guardar
+            @SupplierID = @NextID, @PhoneNumber = @PhoneNumber, @FaxNumber = @FaxNumber, @WebsiteURL = @WebsiteURL,
+            @DeliveryAddressLine1 = @DeliveryAddressLine1, @DeliveryAddressLine2 = @DeliveryAddressLine2,
+            @DeliveryPostalCode = @DeliveryPostalCode,
+            @PostalAddressLine1 = @PostalAddressLine1, @PostalAddressLine2 = @PostalAddressLine2,
+            @Latitud = @Latitud, @Longitud = @Longitud,
+            @BankAccountName = @BankAccountName, @BankAccountNumber = @BankAccountNumber;
 
         COMMIT TRANSACTION;
     END TRY
@@ -208,6 +218,10 @@ CREATE OR ALTER PROCEDURE Api.usp_Proveedores_Modificar
 AS
 BEGIN
     SET NOCOUNT ON;
+    -- Los proveedores se modifican SOLO en Corp y se replican a las sucursales (igual que los productos).
+    IF ISNULL((SELECT Nodo FROM dbo.NodoConfig), N'') <> N'CORP'
+        THROW 50063, 'Los proveedores se administran en el nodo Corporativo; se replican a las sucursales.', 1;
+
     SET XACT_ABORT ON;
     BEGIN TRY
         BEGIN TRANSACTION;
@@ -237,6 +251,15 @@ BEGIN
             DeliveryCityID = @DeliveryCityID,
             LastEditedBy = (SELECT MIN(PersonID) FROM Syn.People)
         WHERE SupplierID = @SupplierID;
+        -- Telefono, direcciones, datos del banco y demas datos sensibles: solo en Corp, en la misma transaccion
+        EXEC Api.usp_ProveedoresContacto_Guardar
+            @SupplierID = @SupplierID, @PhoneNumber = @PhoneNumber, @FaxNumber = @FaxNumber, @WebsiteURL = @WebsiteURL,
+            @DeliveryAddressLine1 = @DeliveryAddressLine1, @DeliveryAddressLine2 = @DeliveryAddressLine2,
+            @DeliveryPostalCode = @DeliveryPostalCode,
+            @PostalAddressLine1 = @PostalAddressLine1, @PostalAddressLine2 = @PostalAddressLine2,
+            @Latitud = @Latitud, @Longitud = @Longitud,
+            @BankAccountName = @BankAccountName, @BankAccountNumber = @BankAccountNumber;
+
         COMMIT TRANSACTION;
     END TRY
     BEGIN CATCH
@@ -250,25 +273,68 @@ CREATE OR ALTER PROCEDURE Api.usp_Proveedores_Eliminar
 AS
 BEGIN
     SET NOCOUNT ON;
+    -- Los proveedores se eliminan SOLO en Corp y se replican a las sucursales (igual que los productos).
+    IF ISNULL((SELECT Nodo FROM dbo.NodoConfig), N'') <> N'CORP'
+        THROW 50063, 'Los proveedores se administran en el nodo Corporativo; se replican a las sucursales.', 1;
+
+    IF NOT EXISTS (SELECT 1 FROM Syn.Suppliers WHERE SupplierID = @SupplierID)
+        THROW 50004, 'El proveedor no existe.', 1;
+
+    -- El catalogo de productos es igual en todos los nodos, asi que esto se revisa aqui
+    IF EXISTS (SELECT 1 FROM Syn.StockItems WHERE SupplierID = @SupplierID)
+        THROW 50013, 'No se puede eliminar: el proveedor tiene productos asociados.', 1;
+
+    -- Las ordenes de compra y transacciones viven en las sucursales (fragmentacion), no en Corp.
+    -- Hay que revisarlas alla ANTES de borrar: si no, el DELETE replicado fallaria en la
+    -- sucursal y dejaria atascada su replicacion. Va fuera de la transaccion porque una
+    -- transaccion con linked servers pide MSDTC.
+    DECLARE @sucursales TABLE (Servidor SYSNAME, Etiqueta NVARCHAR(10));
+    INSERT @sucursales VALUES (N'sj', N'SJ'), (N'limon', N'Limón');
+
+    DECLARE @dep TABLE (Esquema SYSNAME, Tabla SYSNAME, Columna SYSNAME, Descripcion NVARCHAR(60));
+    INSERT @dep VALUES (N'Purchasing', N'PurchaseOrders', N'SupplierID', N'órdenes de compra'),
+                       (N'Purchasing', N'SupplierTransactions', N'SupplierID', N'transacciones'),
+                       (N'Warehouse', N'StockItemTransactions', N'SupplierID', N'movimientos de inventario');
+
+    DECLARE @srv SYSNAME, @etq NVARCHAR(10), @esq SYSNAME, @tab SYSNAME, @col SYSNAME, @desc NVARCHAR(60);
+    DECLARE @sqlDin NVARCHAR(MAX), @cnt INT, @msg NVARCHAR(400);
+
+    DECLARE cur_dep CURSOR LOCAL FAST_FORWARD FOR
+        SELECT s.Servidor, s.Etiqueta, t.Esquema, t.Tabla, t.Columna, t.Descripcion
+        FROM @sucursales s CROSS JOIN @dep t;
+    OPEN cur_dep;
+    FETCH NEXT FROM cur_dep INTO @srv, @etq, @esq, @tab, @col, @desc;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        SET @cnt = NULL;
+        SET @sqlDin = N'SELECT @n = COUNT(*) FROM ' + QUOTENAME(@srv) + N'.WideWorldImporters.'
+                    + QUOTENAME(@esq) + N'.' + QUOTENAME(@tab) + N' WHERE ' + QUOTENAME(@col) + N' = @id';
+        BEGIN TRY
+            EXEC sp_executesql @sqlDin, N'@id INT, @n INT OUTPUT', @id = @SupplierID, @n = @cnt OUTPUT;
+        END TRY
+        BEGIN CATCH
+            CLOSE cur_dep; DEALLOCATE cur_dep;
+            SET @msg = CONCAT(N'No se puede verificar si el proveedor tiene movimientos: la sucursal ', @etq,
+                              N' no responde (', ERROR_MESSAGE(), N'). Intente más tarde.');
+            THROW 50075, @msg, 1;
+        END CATCH
+
+        IF @cnt > 0
+        BEGIN
+            CLOSE cur_dep; DEALLOCATE cur_dep;
+            SET @msg = CONCAT(N'No se puede eliminar: el proveedor tiene ', @desc, N' en la sucursal ', @etq, N'.');
+            THROW 50011, @msg, 1;
+        END
+
+        FETCH NEXT FROM cur_dep INTO @srv, @etq, @esq, @tab, @col, @desc;
+    END
+    CLOSE cur_dep; DEALLOCATE cur_dep;
+
     SET XACT_ABORT ON;
     BEGIN TRY
         BEGIN TRANSACTION;
 
-        IF NOT EXISTS (SELECT 1 FROM Syn.Suppliers WHERE SupplierID = @SupplierID)
-            THROW 50004, 'El proveedor no existe.', 1;
-
-        IF EXISTS (SELECT 1 FROM Syn.PurchaseOrders WHERE SupplierID = @SupplierID)
-            THROW 50011, 'No se puede eliminar: el proveedor tiene ordenes de compra asociadas.', 1;
-
-        IF EXISTS (SELECT 1 FROM Syn.SupplierTransactions WHERE SupplierID = @SupplierID)
-            THROW 50012, 'No se puede eliminar: el proveedor tiene transacciones asociadas.', 1;
-
-        IF EXISTS (SELECT 1 FROM Syn.StockItems WHERE SupplierID = @SupplierID)
-            THROW 50013, 'No se puede eliminar: el proveedor tiene productos asociados.', 1;
-
-        IF EXISTS (SELECT 1 FROM Syn.StockItemTransactions WHERE SupplierID = @SupplierID)
-            THROW 50014, 'No se puede eliminar: el proveedor tiene movimientos de inventario asociados.', 1;
-
+        DELETE FROM dbo.Suppliers_Contact WHERE SupplierID = @SupplierID;
         DELETE FROM Syn.Suppliers WHERE SupplierID = @SupplierID;
 
         COMMIT TRANSACTION;

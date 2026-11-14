@@ -15,6 +15,9 @@ function normalizar(texto) {
 // Errores que indican que el nodo no responde (y no un error de la consulta)
 const FALLO_DE_NODO = /Failed to connect|Connection is closed|Connection lost|ECONNREFUSED|ECONNRESET|ESOCKET|ETIMEOUT|ETIMEDOUT|socket hang up/i;
 
+// Puerto de cada nodo, para decir en el aviso CUAL no responde (puede ser Corp aunque el usuario sea de SJ)
+const NODO_POR_PUERTO = { 1437: 'SJ', 1435: 'LIMON', 1436: 'CORP' };
+
 function resolveNodo(req, res, next) {
   if (PUBLICAS.includes(req.path)) return next();
 
@@ -40,7 +43,9 @@ function resolveNodo(req, res, next) {
   res.json = (cuerpo) => {
     if (res.statusCode === 500 && cuerpo && typeof cuerpo.error === 'string' && FALLO_DE_NODO.test(cuerpo.error)) {
       res.status(503);
-      cuerpo = { error: `El nodo ${nodo.toUpperCase()} no está disponible por ahora. Intente de nuevo en unos minutos.`, nodo };
+      const puerto = (cuerpo.error.match(/:(14\d\d)\b/) || [])[1];
+      const cual = NODO_POR_PUERTO[puerto] || nodo.toUpperCase();
+      cuerpo = { error: `El nodo ${cual} no está disponible por ahora. Intente de nuevo en unos minutos.`, nodo: cual.toLowerCase() };
     }
     return json(cuerpo);
   };
