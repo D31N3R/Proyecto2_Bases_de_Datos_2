@@ -7,16 +7,16 @@ const baseOptions = {
 };
 
 // ---- Identidad en la base de datos ----
-// USAR_USUARIOS_BD=false (por defecto): la API se conecta como sa.
-// USAR_USUARIOS_BD=true: cada rol de la aplicacion se conecta con su propio usuario de SQL Server
+// Por defecto cada rol de la aplicacion se conecta con su propio usuario de SQL Server
+// (USAR_USUARIOS_BD=false en el .env lo desactiva y la API se conecta como sa, solo para depurar):
 //   Administrador -> app_admin   (solo ejecuta procedimientos del esquema Api)
 //   Corporativo   -> app_corp    (solo los reportes de estadisticas)
 //   Sistema       -> app_auth    (login de usuarios y /status)
 //   Refresco      -> app_refresh (solo el refresco del consolidado en Corp)
-// Los usuarios se crean con Script_sql/_all_07_Seguridad.sql; las contrasenas van en .env
+// Los usuarios se crean con Script_sql/_all_06_Seguridad.sql; las contrasenas van en .env
 const { AsyncLocalStorage } = require('async_hooks');
 const contextoUsuario = new AsyncLocalStorage(); // la middleware de autenticacion guarda aqui el rol de la peticion
-const USAR_USUARIOS_BD = process.env.USAR_USUARIOS_BD === 'true';
+const USAR_USUARIOS_BD = process.env.USAR_USUARIOS_BD !== 'false';
 
 const CUENTAS_BD = {
   Administrador: { user: 'app_admin', password: process.env.DB_PASS_ADMIN },

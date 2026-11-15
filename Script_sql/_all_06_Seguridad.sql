@@ -20,7 +20,7 @@
    Cambiar las contrasenas de abajo antes de usarlo fuera de clase.
    Se puede volver a ejecutar sin problema.
    Lo que depende de objetos que solo existen en Corp (login de usuarios, consolidado)
-   esta en _corp_9_seguridad.sql, que init-nodes.sh ejecuta despues.
+   esta en _corp_8_seguridad.sql, que init-nodes.sh ejecuta despues.
    ============================================================ */
 
 USE master;

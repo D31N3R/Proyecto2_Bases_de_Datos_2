@@ -300,6 +300,11 @@ router.post('/estadisticas/refrescar', async (req, res) => {
     await refrescarConsolidado();
     res.json({ ok: true });
   } catch (error) {
+    // Si una sucursal no responde, el refresco se cancela entero y el consolidado anterior queda intacto
+    const sucursalCaida = /Named Pipes|TCP Provider|Login timeout|network-related|Could not open a connection/i.test(error.message);
+    if (sucursalCaida) {
+      return res.status(503).json({ error: 'Una sucursal no responde. Se conserva la última copia del consolidado; intente de nuevo cuando vuelva.' });
+    }
     res.status(500).json({ error: error.message });
   }
 });

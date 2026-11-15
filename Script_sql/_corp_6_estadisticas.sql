@@ -94,66 +94,65 @@ CREATE TABLE dbo.Estadisticas_Ventas (
 GO
 
 /* Copia los datos de ambas sucursales a Consolidado.* y recalcula el resumen mensual.
-   Sin transaccion explicita: una transaccion que lee de linked servers pide MSDTC. */
+   Se hace en DOS fases para no dejar el consolidado a medias si una sucursal no responde:
+   1) Se lee TODO de las sucursales a tablas temporales. Aqui es donde puede fallar un nodo;
+      si pasa, el procedimiento termina con error y el consolidado actual no se toca: la API
+      sigue mostrando la ultima copia, marcada como desactualizada.
+   2) En una transaccion LOCAL se reemplaza el consolidado con lo ya leido. Sin linked servers
+      dentro de la transaccion no se pide MSDTC, y quien consulta ve la copia vieja o la nueva
+      completa, nunca una a medias. */
 CREATE OR ALTER PROCEDURE Api.usp_Estadisticas_Refrescar
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    -- Facturas
-    DROP TABLE IF EXISTS Consolidado.Invoices;
+    -- ---------- Fase 1: leer de las sucursales ----------
     SELECT CAST(N'SJ' AS NVARCHAR(10)) AS Sucursal,
            InvoiceID, CustomerID, BillToCustomerID, OrderID, DeliveryMethodID,
            SalespersonPersonID, InvoiceDate
-    INTO Consolidado.Invoices
+    INTO #Invoices
     FROM [sj].WideWorldImporters.Sales.Invoices;
 
-    INSERT INTO Consolidado.Invoices
+    INSERT INTO #Invoices
         (Sucursal, InvoiceID, CustomerID, BillToCustomerID, OrderID, DeliveryMethodID,
          SalespersonPersonID, InvoiceDate)
     SELECT N'LIMON', InvoiceID, CustomerID, BillToCustomerID, OrderID, DeliveryMethodID,
            SalespersonPersonID, InvoiceDate
     FROM [limon].WideWorldImporters.Sales.Invoices;
 
-    -- Lineas de factura
-    DROP TABLE IF EXISTS Consolidado.InvoiceLines;
     SELECT CAST(N'SJ' AS NVARCHAR(10)) AS Sucursal,
            InvoiceLineID, InvoiceID, StockItemID, Quantity, UnitPrice, TaxAmount,
            LineProfit, ExtendedPrice
-    INTO Consolidado.InvoiceLines
+    INTO #InvoiceLines
     FROM [sj].WideWorldImporters.Sales.InvoiceLines;
 
-    INSERT INTO Consolidado.InvoiceLines
+    INSERT INTO #InvoiceLines
         (Sucursal, InvoiceLineID, InvoiceID, StockItemID, Quantity, UnitPrice, TaxAmount,
          LineProfit, ExtendedPrice)
     SELECT N'LIMON', InvoiceLineID, InvoiceID, StockItemID, Quantity, UnitPrice, TaxAmount,
            LineProfit, ExtendedPrice
     FROM [limon].WideWorldImporters.Sales.InvoiceLines;
 
-    -- Ordenes de compra
-    DROP TABLE IF EXISTS Consolidado.PurchaseOrders;
     SELECT CAST(N'SJ' AS NVARCHAR(10)) AS Sucursal,
            PurchaseOrderID, SupplierID, OrderDate, DeliveryMethodID,
            ExpectedDeliveryDate, IsOrderFinalized
-    INTO Consolidado.PurchaseOrders
+    INTO #PurchaseOrders
     FROM [sj].WideWorldImporters.Purchasing.PurchaseOrders;
 
-    INSERT INTO Consolidado.PurchaseOrders
+    INSERT INTO #PurchaseOrders
         (Sucursal, PurchaseOrderID, SupplierID, OrderDate, DeliveryMethodID,
          ExpectedDeliveryDate, IsOrderFinalized)
     SELECT N'LIMON', PurchaseOrderID, SupplierID, OrderDate, DeliveryMethodID,
            ExpectedDeliveryDate, IsOrderFinalized
     FROM [limon].WideWorldImporters.Purchasing.PurchaseOrders;
 
-    -- Lineas de ordenes de compra
-    DROP TABLE IF EXISTS Consolidado.PurchaseOrderLines;
     SELECT CAST(N'SJ' AS NVARCHAR(10)) AS Sucursal,
            PurchaseOrderLineID, PurchaseOrderID, StockItemID, OrderedOuters,
            ReceivedOuters, ExpectedUnitPricePerOuter
-    INTO Consolidado.PurchaseOrderLines
+    INTO #PurchaseOrderLines
     FROM [sj].WideWorldImporters.Purchasing.PurchaseOrderLines;
 
-    INSERT INTO Consolidado.PurchaseOrderLines
+    INSERT INTO #PurchaseOrderLines
         (Sucursal, PurchaseOrderLineID, PurchaseOrderID, StockItemID, OrderedOuters,
          ReceivedOuters, ExpectedUnitPricePerOuter)
     SELECT N'LIMON', PurchaseOrderLineID, PurchaseOrderID, StockItemID, OrderedOuters,
@@ -161,9 +160,8 @@ BEGIN
     FROM [limon].WideWorldImporters.Purchasing.PurchaseOrderLines;
 
     -- Existencias: suma de lo que tiene cada sucursal, por producto
-    DROP TABLE IF EXISTS Consolidado.StockItemHoldings;
     SELECT StockItemID, CAST(SUM(QuantityOnHand) AS INT) AS QuantityOnHand
-    INTO Consolidado.StockItemHoldings
+    INTO #StockItemHoldings
     FROM (
         SELECT StockItemID, QuantityOnHand FROM [sj].WideWorldImporters.Warehouse.StockItemHoldings
         UNION ALL
@@ -171,16 +169,38 @@ BEGIN
     ) AS x
     GROUP BY StockItemID;
 
-    -- Resumen mensual, calculado desde el consolidado
-    TRUNCATE TABLE dbo.Estadisticas_Ventas;
+    -- ---------- Fase 2: reemplazar el consolidado (transaccion local) ----------
+    BEGIN TRY
+        BEGIN TRANSACTION;
 
-    INSERT INTO dbo.Estadisticas_Ventas (Sucursal, Anio, Mes, TotalFacturas, TotalVentas)
-    SELECT i.Sucursal, YEAR(i.InvoiceDate), MONTH(i.InvoiceDate),
-           COUNT(DISTINCT i.InvoiceID), SUM(il.ExtendedPrice)
-    FROM Consolidado.Invoices i
-    JOIN Consolidado.InvoiceLines il
-      ON il.InvoiceID = i.InvoiceID AND il.Sucursal = i.Sucursal
-    GROUP BY i.Sucursal, YEAR(i.InvoiceDate), MONTH(i.InvoiceDate);
+        DROP TABLE IF EXISTS Consolidado.Invoices;
+        SELECT * INTO Consolidado.Invoices FROM #Invoices;
+        DROP TABLE IF EXISTS Consolidado.InvoiceLines;
+        SELECT * INTO Consolidado.InvoiceLines FROM #InvoiceLines;
+        DROP TABLE IF EXISTS Consolidado.PurchaseOrders;
+        SELECT * INTO Consolidado.PurchaseOrders FROM #PurchaseOrders;
+        DROP TABLE IF EXISTS Consolidado.PurchaseOrderLines;
+        SELECT * INTO Consolidado.PurchaseOrderLines FROM #PurchaseOrderLines;
+        DROP TABLE IF EXISTS Consolidado.StockItemHoldings;
+        SELECT * INTO Consolidado.StockItemHoldings FROM #StockItemHoldings;
+
+        -- Resumen mensual, calculado desde el consolidado
+        TRUNCATE TABLE dbo.Estadisticas_Ventas;
+
+        INSERT INTO dbo.Estadisticas_Ventas (Sucursal, Anio, Mes, TotalFacturas, TotalVentas)
+        SELECT i.Sucursal, YEAR(i.InvoiceDate), MONTH(i.InvoiceDate),
+               COUNT(DISTINCT i.InvoiceID), SUM(il.ExtendedPrice)
+        FROM Consolidado.Invoices i
+        JOIN Consolidado.InvoiceLines il
+          ON il.InvoiceID = i.InvoiceID AND il.Sucursal = i.Sucursal
+        GROUP BY i.Sucursal, YEAR(i.InvoiceDate), MONTH(i.InvoiceDate);
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
 END
 GO
 

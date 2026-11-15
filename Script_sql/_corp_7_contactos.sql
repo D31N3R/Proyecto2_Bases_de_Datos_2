@@ -68,15 +68,6 @@ BEGIN
 END
 GO
 
-CREATE OR ALTER PROCEDURE Api.usp_ClientesContacto_Eliminar
-    @CustomerID INT
-AS
-BEGIN
-    SET NOCOUNT ON;
-    DELETE FROM dbo.Customers_Contact WHERE CustomerID = @CustomerID;
-END
-GO
-
 CREATE OR ALTER PROCEDURE Api.usp_ProveedoresContacto_Obtener
     @SupplierID INT
 AS
@@ -142,14 +133,5 @@ BEGIN
         IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
         THROW;
     END CATCH
-END
-GO
-
-CREATE OR ALTER PROCEDURE Api.usp_ProveedoresContacto_Eliminar
-    @SupplierID INT
-AS
-BEGIN
-    SET NOCOUNT ON;
-    DELETE FROM dbo.Suppliers_Contact WHERE SupplierID = @SupplierID;
 END
 GO

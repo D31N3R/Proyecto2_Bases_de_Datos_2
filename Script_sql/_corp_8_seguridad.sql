@@ -2,14 +2,14 @@ USE WideWorldImporters;
 GO
 
 /* ============================================================
-   SEGURIDAD - parte de Corp (se ejecuta despues de _all_07 y de los demas _corp_*)
+   SEGURIDAD - parte de Corp (se ejecuta despues de _all_06 y de los demas _corp_*)
 
    Aqui existen ya el procedimiento de login, la llave de las contrasenas y el consolidado,
    por eso los permisos que dependen de ellos van en este script.
    Se puede volver a ejecutar sin problema.
    ============================================================ */
 
--- Corporativo: reportes de Corp (usp_Estadisticas_Consultar y Refrescar nacen en _corp_6)
+-- Corporativo: reportes de Corp (los usp_Estadisticas_* de Corp nacen en _corp_6)
 DECLARE @sql NVARCHAR(MAX) = N'';
 SELECT @sql += N'GRANT EXECUTE ON Api.' + QUOTENAME(name) + N' TO rol_corporativo;' + CHAR(10)
 FROM sys.procedures

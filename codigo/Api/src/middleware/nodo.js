@@ -53,4 +53,3 @@ function resolveNodo(req, res, next) {
 }
 
 module.exports = resolveNodo;
-module.exports.normalizar = normalizar;
