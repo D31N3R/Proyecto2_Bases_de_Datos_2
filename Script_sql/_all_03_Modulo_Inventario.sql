@@ -134,7 +134,8 @@ BEGIN
         si.TypicalWeightPerUnit AS Peso,
         REPLACE(si.SearchDetails, ' ', ', ') AS PalabrasClaves,
         ISNULL(sih.QuantityOnHand, 0) AS CantidadDisponible,
-        sih.BinLocation AS Ubicacion
+        sih.BinLocation AS Ubicacion,
+        CONVERT(VARCHAR(27), si.ValidFrom, 121) AS Version
     FROM Syn.StockItems si
     LEFT JOIN Syn.Suppliers sup ON sup.SupplierID = si.SupplierID
     LEFT JOIN Syn.Colors col ON col.ColorID = si.ColorID
@@ -233,16 +234,8 @@ BEGIN
             @TypicalWeightPerUnit, @SistemaPersonID
         );
 
-        INSERT INTO Syn.StockItemHoldings (
-            StockItemID, QuantityOnHand, BinLocation,
-            LastStocktakeQuantity, LastCostPrice,
-            ReorderLevel, TargetStockLevel, LastEditedBy
-        )
-        VALUES (
-            @NextItemID, @QuantityOnHand, @BinLocation,
-            @QuantityOnHand, @UnitPrice,
-            0, 0, @SistemaPersonID
-        );
+        -- Corp solo guarda el catalogo: la cantidad y la ubicacion (@QuantityOnHand, @BinLocation)
+        -- son inventario de cada sucursal y se guardan con Api.usp_Inventario_AjustarCantidad.
 
         INSERT INTO Syn.StockItemStockGroups (
             StockItemStockGroupID, StockItemID, StockGroupID, LastEditedBy
@@ -277,7 +270,8 @@ CREATE OR ALTER PROCEDURE Api.usp_Inventario_Modificar
     @Brand NVARCHAR(50) = NULL,
     @Size NVARCHAR(20) = NULL,
     @RecommendedRetailPrice DECIMAL(18,2) = NULL,
-    @QuantityOnHand INT = 0
+    @QuantityOnHand INT = 0,
+    @Version VARCHAR(27) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -313,14 +307,16 @@ BEGIN
             UnitPrice = @UnitPrice,
             RecommendedRetailPrice = @RecommendedRetailPrice,
             TypicalWeightPerUnit = @TypicalWeightPerUnit,
-            LastEditedBy = @SistemaPersonID
-        WHERE StockItemID = @StockItemID;
+            LastEditedBy = @SistemaPersonID,
+            ValidFrom = SYSUTCDATETIME()      -- cambia la version: quien tenia la anterior ya no puede guardar
+        WHERE StockItemID = @StockItemID
+          AND (@Version IS NULL OR CONVERT(VARCHAR(27), ValidFrom, 121) = @Version);
 
-        UPDATE Syn.StockItemHoldings
-        SET QuantityOnHand = @QuantityOnHand,
-            BinLocation = @BinLocation,
-            LastEditedBy = @SistemaPersonID
-        WHERE StockItemID = @StockItemID;
+        -- El producto existe (se verifico arriba): si no se actualizo nada, alguien lo cambio antes
+        IF @@ROWCOUNT = 0
+            THROW 50080, 'El producto fue modificado por otro usuario. Recargue los datos antes de guardar.', 1;
+
+        -- La cantidad y la ubicacion son inventario de la sucursal: ver Api.usp_Inventario_AjustarCantidad
 
         COMMIT TRANSACTION;
     END TRY
@@ -341,6 +337,86 @@ BEGIN
     -- El catalogo de productos se edita solo en Corp y se replica a las sucursales
     IF ISNULL((SELECT Nodo FROM dbo.NodoConfig), N'') <> N'CORP'
         THROW 50070, 'El catálogo de productos solo se modifica en el nodo Corporativo; se replica a las sucursales.', 1;
+            -- Las ventas, ordenes y movimientos viven en las sucursales (fragmentacion), no en Corp.
+    -- Hay que revisarlas alla ANTES de borrar: si no, el DELETE replicado fallaria en la
+    -- sucursal y dejaria atascada su replicacion. Va fuera de la transaccion porque una
+    -- transaccion con linked servers pide MSDTC.
+    DECLARE @sucursales TABLE (Servidor SYSNAME, Etiqueta NVARCHAR(10));
+    INSERT @sucursales VALUES (N'sj', N'SJ'), (N'limon', N'Limón');
+
+    DECLARE @tablas TABLE (Esquema SYSNAME, Tabla SYSNAME, Descripcion NVARCHAR(60));
+    INSERT @tablas VALUES (N'Sales', N'OrderLines', N'órdenes de venta'),
+                          (N'Sales', N'InvoiceLines', N'facturas'),
+                          (N'Purchasing', N'PurchaseOrderLines', N'órdenes de compra'),
+                          (N'Warehouse', N'StockItemTransactions', N'movimientos de inventario'),
+                          (N'Sales', N'SpecialDeals', N'ofertas especiales');
+
+    DECLARE @srv SYSNAME, @etq NVARCHAR(10), @esq SYSNAME, @tab SYSNAME, @desc NVARCHAR(60);
+    DECLARE @sqlDin NVARCHAR(MAX), @cnt INT, @msg NVARCHAR(400);
+
+    DECLARE cur_suc CURSOR LOCAL FAST_FORWARD FOR
+        SELECT s.Servidor, s.Etiqueta, t.Esquema, t.Tabla, t.Descripcion
+        FROM @sucursales s CROSS JOIN @tablas t;
+    OPEN cur_suc;
+    FETCH NEXT FROM cur_suc INTO @srv, @etq, @esq, @tab, @desc;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        SET @cnt = NULL;
+        SET @sqlDin = N'SELECT @n = COUNT(*) FROM ' + QUOTENAME(@srv) + N'.WideWorldImporters.'
+                    + QUOTENAME(@esq) + N'.' + QUOTENAME(@tab) + N' WHERE StockItemID = @id';
+        BEGIN TRY
+            EXEC sp_executesql @sqlDin, N'@id INT, @n INT OUTPUT', @id = @StockItemID, @n = @cnt OUTPUT;
+        END TRY
+        BEGIN CATCH
+            CLOSE cur_suc; DEALLOCATE cur_suc;
+            SET @msg = CONCAT(N'No se puede verificar si el producto tiene ventas: la sucursal ', @etq,
+                              N' no responde (', ERROR_MESSAGE(), N'). Intente más tarde.');
+            THROW 50031, @msg, 1;
+        END CATCH
+
+        IF @cnt > 0
+        BEGIN
+            CLOSE cur_suc; DEALLOCATE cur_suc;
+            SET @msg = CONCAT(N'No se puede eliminar: el producto tiene ', @desc, N' en la sucursal ', @etq, N'.');
+            THROW 50032, @msg, 1;
+        END
+
+        FETCH NEXT FROM cur_suc INTO @srv, @etq, @esq, @tab, @desc;
+    END
+    CLOSE cur_suc; DEALLOCATE cur_suc;
+
+    -- Si alguna sucursal todavia tiene existencias, no se elimina: la llave foranea del inventario
+    -- borra en cascada, asi que se perderia el inventario de esa sucursal.
+    DECLARE cur_stock CURSOR LOCAL FAST_FORWARD FOR SELECT Servidor, Etiqueta FROM @sucursales;
+    OPEN cur_stock;
+    FETCH NEXT FROM cur_stock INTO @srv, @etq;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        SET @cnt = NULL;
+        SET @sqlDin = N'SELECT @n = ISNULL(SUM(QuantityOnHand), 0) FROM ' + QUOTENAME(@srv)
+                    + N'.WideWorldImporters.Warehouse.StockItemHoldings WHERE StockItemID = @id';
+        BEGIN TRY
+            EXEC sp_executesql @sqlDin, N'@id INT, @n INT OUTPUT', @id = @StockItemID, @n = @cnt OUTPUT;
+        END TRY
+        BEGIN CATCH
+            CLOSE cur_stock; DEALLOCATE cur_stock;
+            SET @msg = CONCAT(N'No se puede verificar las existencias del producto: la sucursal ', @etq,
+                              N' no responde (', ERROR_MESSAGE(), N'). Intente más tarde.');
+            THROW 50075, @msg, 1;
+        END CATCH
+
+        IF @cnt > 0
+        BEGIN
+            CLOSE cur_stock; DEALLOCATE cur_stock;
+            SET @msg = CONCAT(N'No se puede eliminar: la sucursal ', @etq, N' todavía tiene ', @cnt,
+                              N' unidades en inventario. Deje la cantidad en 0 antes de eliminarlo.');
+            THROW 50074, @msg, 1;
+        END
+
+        FETCH NEXT FROM cur_stock INTO @srv, @etq;
+    END
+    CLOSE cur_stock; DEALLOCATE cur_stock;
+
     SET XACT_ABORT ON;
     BEGIN TRY
         BEGIN TRANSACTION;
@@ -366,6 +442,60 @@ BEGIN
         DELETE FROM Syn.StockItemHoldings WHERE StockItemID = @StockItemID;
         DELETE FROM Syn.StockItemStockGroups WHERE StockItemID = @StockItemID;
         DELETE FROM Syn.StockItems WHERE StockItemID = @StockItemID;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END
+GO
+
+-- Inventario propio de cada sucursal: cantidad y ubicacion de un producto del catalogo.
+-- Si la sucursal todavia no tiene fila para el producto, la crea.
+-- Corp no lo usa: no guarda inventario.
+CREATE OR ALTER PROCEDURE Api.usp_Inventario_AjustarCantidad
+    @StockItemID INT,
+    @QuantityOnHand INT,
+    @BinLocation NVARCHAR(20)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF ISNULL((SELECT Nodo FROM dbo.NodoConfig), N'') = N'CORP'
+        THROW 50071, 'El inventario lo maneja cada sucursal; el nodo Corporativo no guarda cantidades.', 1;
+    IF @QuantityOnHand < 0
+        THROW 50072, 'La cantidad no puede ser negativa.', 1;
+
+    SET XACT_ABORT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- Un producto recien creado en Corp puede tardar unos segundos en replicarse aqui
+        DECLARE @UnitPrice DECIMAL(18,2) = (SELECT UnitPrice FROM Syn.StockItems WHERE StockItemID = @StockItemID);
+        IF @UnitPrice IS NULL
+            THROW 50073, 'El producto todavía no existe en esta sucursal (replicación pendiente).', 1;
+
+        DECLARE @SistemaPersonID INT = (SELECT MIN(PersonID) FROM Syn.People);
+
+        -- UPDLOCK + HOLDLOCK: dos ajustes a la vez no intentan insertar la misma fila dos veces
+        UPDATE Syn.StockItemHoldings WITH (UPDLOCK, HOLDLOCK)
+        SET QuantityOnHand = @QuantityOnHand,
+            BinLocation = @BinLocation,
+            LastEditedBy = @SistemaPersonID
+        WHERE StockItemID = @StockItemID;
+
+        IF @@ROWCOUNT = 0
+            INSERT INTO Syn.StockItemHoldings (
+                StockItemID, QuantityOnHand, BinLocation,
+                LastStocktakeQuantity, LastCostPrice,
+                ReorderLevel, TargetStockLevel, LastEditedBy
+            )
+            VALUES (
+                @StockItemID, @QuantityOnHand, @BinLocation,
+                @QuantityOnHand, @UnitPrice,
+                0, 0, @SistemaPersonID
+            );
 
         COMMIT TRANSACTION;
     END TRY

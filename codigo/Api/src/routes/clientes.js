@@ -32,6 +32,15 @@ function agregarCampos(request, body) {
     .input('Longitud', sql.Decimal(9, 6), opcional(body.longitud));
 }
 
+// Teléfono, direcciones y demás datos sensibles se guardan solo en Corp
+async function leerContacto(id) {
+  const corp = await getConnection('corp');
+  const result = await corp.request()
+    .input('CustomerID', sql.Int, id)
+    .execute('Api.usp_ClientesContacto_Obtener');
+  return result.recordset[0] || {};
+}
+
 // GET /api/clientes/categorias
 router.get('/clientes/categorias', async (req, res) => {
   try {
@@ -93,19 +102,39 @@ router.get('/clientes/:id', async (req, res) => {
       .execute('Api.usp_Clientes_Detalle');
 
     if (result.recordset.length === 0) {
-      return res.status(404).json({ error: 'Cliente no encontrado' });
+      // Un cliente recien creado en Corp tarda unos segundos en replicarse a la sucursal:
+      // mientras tanto se muestra desde Corp (su detalle ya incluye el contacto)
+      const corp = await getConnection('corp');
+      const enCorp = await corp.request()
+        .input('CustomerID', sql.Int, req.params.id)
+        .execute('Api.usp_Clientes_Detalle');
+      if (enCorp.recordset.length === 0) {
+        return res.status(404).json({ error: 'Cliente no encontrado' });
+      }
+      return res.json({ ...enCorp.recordset[0], contactoDisponible: true });
     }
-    res.json(result.recordset[0]);
+
+    const cliente = result.recordset[0];
+    // El contacto viene de Corp; si Corp no responde se muestra el resto de los datos
+    try {
+      Object.assign(cliente, await leerContacto(req.params.id));
+      cliente.contactoDisponible = true;
+    } catch (error) {
+      cliente.contactoDisponible = false;
+    }
+    res.json(cliente);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
 // POST /api/clientes - crear
+// Los clientes se crean, modifican y eliminan en Corp (catálogo maestro, igual que los productos);
+// ahí mismo se guarda el contacto sensible y la replicación los lleva a las sucursales.
 router.post('/clientes', async (req, res) => {
   try {
-    const pool = await getConnection(req.nodo);
-    const request = agregarCampos(pool.request(), req.body)
+    const corp = await getConnection('corp');
+    const request = agregarCampos(corp.request(), req.body)
       .output('NuevoCustomerID', sql.Int);
 
     const result = await request.execute('Api.usp_Clientes_Crear');
@@ -118,8 +147,8 @@ router.post('/clientes', async (req, res) => {
 // PUT /api/clientes/:id - modificar
 router.put('/clientes/:id', async (req, res) => {
   try {
-    const pool = await getConnection(req.nodo);
-    const request = agregarCampos(pool.request(), req.body)
+    const corp = await getConnection('corp');
+    const request = agregarCampos(corp.request(), req.body)
       .input('CustomerID', sql.Int, req.params.id);
 
     await request.execute('Api.usp_Clientes_Modificar');
@@ -129,16 +158,16 @@ router.put('/clientes/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/clientes/:id - eliminar
+// DELETE /api/clientes/:id - eliminar (Corp revisa primero que ninguna sucursal tenga facturas del cliente)
 router.delete('/clientes/:id', async (req, res) => {
   try {
-    const pool = await getConnection(req.nodo);
-    await pool.request()
+    const corp = await getConnection('corp');
+    await corp.request()
       .input('CustomerID', sql.Int, req.params.id)
       .execute('Api.usp_Clientes_Eliminar');
-      res.json({ ok: true });
-    } catch (error) {
-      res.status(500).json({ error: error.message || 'Error interno al eliminar el cliente' });
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 

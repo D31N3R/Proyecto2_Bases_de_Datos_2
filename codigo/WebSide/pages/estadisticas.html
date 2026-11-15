@@ -16,6 +16,19 @@
     <!-- Sidebar -->
     <aside class="sidebar-estadisticas">
       <h2>Reportes</h2>
+
+      <!-- Solo para el Corporativo: elegir sucursal o ver la consolidada -->
+      <div class="filtros" id="filtro-sucursal" style="display:none; flex-direction:column; align-items:stretch; padding:0 10px 12px; border-bottom:1px solid #e8e8e8; margin-bottom:12px;">
+        <label for="sel-sucursal">Sucursal</label>
+        <select id="sel-sucursal">
+          <option value="consolidada">Consolidada (ambas)</option>
+          <option value="sj">San José</option>
+          <option value="limon">Limón</option>
+        </select>
+        <button type="button" id="btn-refrescar" class="btn-secondary">Actualizar datos consolidados</button>
+        <span id="estado-consolidado" class="descripcion" style="margin:0;"></span>
+      </div>
+
       <nav id="lista-reportes">
         <button class="reporte-btn activo" data-reporte="1">
           <span class="reporte-num">01</span>
@@ -297,5 +310,49 @@
 
   <script src="../js/api.js"></script>
   <script src="../js/estadisticas.js"></script>
+  <script>
+    // Selector de sucursal del Corporativo (los administradores ven solo su sucursal)
+    if (esCorporativo()) {
+      const caja = document.getElementById('filtro-sucursal');
+      const selector = document.getElementById('sel-sucursal');
+      const boton = document.getElementById('btn-refrescar');
+      const estado = document.getElementById('estado-consolidado');
+
+      caja.style.display = 'flex';
+      selector.value = getSucursalEstadisticas();
+
+      selector.addEventListener('change', () => {
+        setSucursalEstadisticas(selector.value);
+        window.location.reload();
+      });
+
+      if (selector.value === 'consolidada') {
+        estado.textContent = 'Copia consolidada de ambas sucursales';
+        apiGet('/api/estadisticas/estado')
+          .then((d) => {
+            estado.textContent = d.ultimaActualizacion
+              ? 'Actualizado: ' + new Date(d.ultimaActualizacion).toLocaleString()
+              : 'Copia consolidada de ambas sucursales';
+          })
+          .catch(() => {});
+      } else {
+        boton.style.display = 'none';
+        estado.textContent = 'Datos en vivo de la sucursal';
+      }
+
+      boton.addEventListener('click', async () => {
+        boton.disabled = true;
+        boton.textContent = 'Actualizando...';
+        try {
+          await apiPost('/api/estadisticas/refrescar');
+          window.location.reload();
+        } catch (e) {
+          mostrarToast(e.message, 'error');
+          boton.disabled = false;
+          boton.textContent = 'Actualizar datos consolidados';
+        }
+      });
+    }
+  </script>
 </body>
 </html>

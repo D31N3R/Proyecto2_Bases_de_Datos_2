@@ -320,7 +320,10 @@ BEGIN
     SET XACT_ABORT ON;
     BEGIN TRY
         BEGIN TRANSACTION;
-
+        
+        IF (SELECT Paridad FROM dbo.NodoConfig) IS NULL
+        THROW 50060, 'Este nodo no maneja facturas: solo las sucursales (SJ y Limón) las crean.', 1;
+        
         DECLARE @BillToCustomerID INT, @ContactPersonID INT, @MetodoCliente INT;
 
         SELECT @BillToCustomerID = BillToCustomerID,

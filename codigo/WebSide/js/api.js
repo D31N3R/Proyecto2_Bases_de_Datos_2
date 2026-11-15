@@ -1,9 +1,9 @@
 const API_URL = `http://${window.location.hostname}:4000`;
 
 // ================== Sesión ==================
-// No hay módulo de sesiones (el enunciado no lo pide): el login guarda el usuario
-// en sessionStorage y cada petición manda su sucursal en el header X-Sucursal,
-// que la API usa para elegir a qué nodo conectarse.
+// El login guarda el usuario y su token firmado en sessionStorage. Cada petición manda
+// el token (Authorization: Bearer ...) y la API saca de ahí el rol y la sucursal, así que
+// el navegador ya no decide a qué nodo se conecta ni qué puede hacer.
 const ENLACE_BASE = window.location.pathname.includes('/pages/') ? '../' : '';
 
 function getSesion() {
@@ -24,12 +24,22 @@ function irALogin() {
 
 function cerrarSesion() {
   sessionStorage.removeItem('sesion');
+  sessionStorage.removeItem('sucursalEst');
   irALogin();
 }
 
 function esCorporativo() {
   const s = getSesion();
   return !!s && s.rol === 'Corporativo';
+}
+
+// Sucursal que el Corporativo eligió para las estadísticas: 'consolidada', 'sj' o 'limon'
+function getSucursalEstadisticas() {
+  return sessionStorage.getItem('sucursalEst') || 'consolidada';
+}
+
+function setSucursalEstadisticas(valor) {
+  sessionStorage.setItem('sucursalEst', valor);
 }
 
 // Nodo con el que debe hablar la API para esta sesión: SJ, LIMON o CORP
@@ -60,11 +70,6 @@ function mostrarBarraSesion() {
   const s = getSesion();
   if (!s || window.PAGINA_PUBLICA) return;
 
-  const estilos = document.createElement('link');
-  estilos.rel = 'stylesheet';
-  estilos.href = ENLACE_BASE + 'css/sesion.css';
-  document.head.appendChild(estilos);
-
   const barra = document.createElement('div');
   barra.className = 'barra-sesion';
 
@@ -90,16 +95,27 @@ if (document.readyState === 'loading') {
 
 // ================== Llamadas a la API ==================
 async function pedir(metodo, path, body) {
-  const sucursal = sucursalDeSesion();
-  if (!sucursal) throw new Error('Sesión no iniciada');
+  const sesion = getSesion();
+  if (!sesion || !sesion.token) throw new Error('Sesión no iniciada');
 
-  const opciones = { method: metodo, headers: { 'X-Sucursal': sucursal } };
+  const opciones = { method: metodo, headers: { Authorization: `Bearer ${sesion.token}` } };
   if (body !== undefined) {
     opciones.headers['Content-Type'] = 'application/json';
     opciones.body = JSON.stringify(body);
   }
 
-  const res = await fetch(API_URL + path, opciones);
+  // Las estadísticas del Corporativo llevan el filtro de sucursal (o consolidada)
+  let ruta = path;
+  if (esCorporativo() && path.startsWith('/api/estadisticas')) {
+    ruta += (path.includes('?') ? '&' : '?') + 'sucursal=' + encodeURIComponent(getSucursalEstadisticas());
+  }
+
+  const res = await fetch(API_URL + ruta, opciones);
+  if (res.status === 401) {
+    // Token vencido o inválido: se vuelve al login
+    cerrarSesion();
+    throw new Error('Sesión vencida. Inicie sesión de nuevo.');
+  }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || `Error ${res.status}`);

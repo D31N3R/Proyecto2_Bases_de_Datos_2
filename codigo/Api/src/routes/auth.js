@@ -1,5 +1,6 @@
 const express = require('express');
 const { getConnection, sql } = require('../db');
+const { crearToken } = require('../token');
 
 const router = express.Router();
 
@@ -22,13 +23,13 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: row.mensaje });
     }
 
-    // sin modulo de sesiones (el enunciado no lo pide): el front se queda
-    // con rol y sucursal, y los manda de vuelta en cada request
+    // El token firmado lleva el rol y la sucursal; la API los lee de ahi en cada peticion
     res.json({
       iduser: row.iduser,
       fullname: row.fullname,
       rol: row.rol,
-      sucursal: row.sucursal
+      sucursal: row.sucursal,
+      token: crearToken({ iduser: row.iduser, rol: row.rol, sucursal: row.sucursal })
     });
   } catch (error) {
     res.status(500).json({ error: error.message });

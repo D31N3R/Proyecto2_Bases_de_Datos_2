@@ -1,7 +1,139 @@
-# [NOMBRE DEL PROYECTO]
-### Nombre y carné de los integrantes: 
+# Wide World Importers – Base de datos distribuida (Proyecto 2, Bases de Datos II)
 
+## Nombre y carné de los integrantes:
+- Deiner Cespedes Molina - 2024242294
+- Yader Siezar Chaves - 2024134032
 
-### Estado del proyecto:
-### Enlace del video:
-Recordar que el video debe ser público para ser visto por el profesor
+## Instalacion y ejecucion.
+
+### 1. Clonar repositorio.
+
+```bash 
+	git clone https://github.com/D31N3R/Proyecto2_Bases_de_Datos_2.git
+
+	cd Proyecto2_Bases_de_Datos_2
+```
+
+### 2. Cómo ejecutarlo
+
+1. Descargar la base de ejemplo en `docker/backups/` con:
+```bash 
+	curl -L -o docker/backups/WideWorldImporters-Full.bak https://github.com/Microsoft/sql-server-samples/releases/download/wide-world-importers-v1.0/WideWorldImporters-Full.bak 
+```
+y levantar los contenedores: 
+```bash 
+	cd docker && docker compose up -d
+```
+
+2. Inicializar los nodos: `
+```bash 
+	./init-nodes.sh 
+```
+o
+```bash 
+	bash init-nodes.sh
+```
+Esto restaura la base y ejecuta los scripts por prefijo: `_all_`, `_corp_`, `_sj_`, `_limon_`.
+
+3. API: 
+```bash 
+	cd codigo/Api && cp .env.example .env && npm install 
+```
+luego 
+```bash 
+	npm run dev
+```
+
+4. Web: 
+```bash
+	codigo/WebSide && npm serve
+```
+
+5. Usuarios de prueba (definidos en `Script_sql/_corp_1_users.sql`): `admin_sj` y `admin_limon` (Administrador) y `corp` (Corporativo). Se pueden crear más con `usp_Users_Crear` en Corp.
+
+## Arquitectura
+
+| Nodo | Contenedor | Puerto | Contenido |
+|---|---|---|---|
+| San José | `nodo_sj` | 1437 | Facturación y compras con ID par, inventario propio, catálogo replicado |
+| Limón | `nodo_limon` | 1435 | Facturación y compras con ID impar, inventario propio, catálogo replicado |
+| Corporativo | `nodo_corp` | 1436 | Catálogo maestro de productos, datos sensibles, usuarios, consolidado |
+
+- **API** Node.js + Express (puerto 4000). Todo el acceso a datos es por procedimientos almacenados `Api.usp_*`.
+- **Web** HTML + JS puro. Roles: *Administrador* (clientes, proveedores, productos, facturas de su sucursal) y *Corporativo* (estadísticas).
+- La API se conecta al nodo de la sucursal del usuario (lo decide el token, no el navegador); el Corporativo se conecta a Corp.
+
+## Fragmentación y asignación (justificación)
+
+| Datos | Fragmentación | Asignación | Por qué |
+|---|---|---|---|
+| Facturas y órdenes de compra (con sus líneas) | **Horizontal primaria por paridad del ID** (SJ pares, Limón impares) | Sucursales | Cada sucursal factura de forma independiente: las consultas del día a día son locales y no compiten entre sí. La paridad es simple, determinista y reparte parejo. Los IDs nuevos respetan la paridad del nodo, así que nunca chocan al consolidar. |
+| Pedidos y transacciones de cliente, inventario y proveedor | **Horizontal derivada**: siguen a la factura u orden de compra de la que dependen | Sucursales | Un pedido va al mismo nodo que la factura que lo cubre (si no tiene factura, por su propio ID); una transacción va con su factura u orden de compra (si no tiene, por su propio ID). Así ninguna llave foránea apunta a una fila del otro nodo y no se pierde ninguna factura: SJ y Limón tienen 35 255 facturas cada una (70 510 en total, las de la base original) y 36 798 y 36 797 pedidos (73 595 en total). Las referencias opcionales que sí quedan en el otro nodo (pedido pendiente) se ponen en NULL. |
+| Clientes y proveedores (datos generales) | **Replicación** completa | Corp (maestro) → SJ y Limón | El enunciado pide el mismo catálogo en ambas sucursales. Se administra en un solo lugar (Corp), igual que los productos, y se lee localmente en cada venta y compra. Un solo nodo asigna los IDs, así que no hay choques. |
+| Datos sensibles de clientes y proveedores (teléfono, fax, web, direcciones, ubicación, cuenta bancaria) | **Vertical** (columnas sensibles aparte) | Solo Corp (`Customers_Contact`, `Suppliers_Contact`) | Privacidad: la forma de contacto y los datos bancarios no deben vivir en las sucursales (requisito del enunciado). El alta o modificación los guarda en Corp en la misma transacción y la API los lee desde ahí. |
+| Productos y tablas relacionadas | **Replicación** completa | Corp (maestro) → SJ y Limón | El catálogo es igual en todos los nodos y casi no cambia: se lee localmente (rápido) y se escribe en un solo lugar (Corp), lo que evita conflictos. |
+| Inventario (`StockItemHoldings`) | Una fila por producto en cada sucursal | Cada sucursal (Corp no guarda) | Cada sucursal maneja su propio inventario, aunque comparta el catálogo. |
+| Usuarios | Sin fragmentar | Corp | Un único lugar para autenticar y administrar usuarios. |
+| Estadísticas | Copia materializada | Corp (`Consolidado.*`, `Estadisticas_Ventas`) | El Corporativo necesita ver ambas sucursales sin recorrerlas en vivo cada vez. |
+
+## Replicación
+
+Publicación **transaccional continua** `Pub_Productos_Corp` en Corp (publicador y distribuidor), con San José y Limón como suscriptores. Artículos: `Warehouse.StockItems`, `StockItemStockGroups`, `StockGroups`, `Colors`, `PackageTypes`, `Sales.Customers` y `Purchasing.Suppliers`. Altas, cambios y borrados de productos, clientes y proveedores hechos en Corp llegan a ambas sucursales. El inventario y los datos sensibles no se replican.
+
+Como el catálogo solo se edita en Corp, SJ y Limón rechazan crear o borrar productos (error 50070) y crear, modificar o eliminar clientes y proveedores (errores 50062 y 50063). Antes de borrar, Corp revisa en ambas sucursales: un producto no se elimina si tiene ventas, órdenes, movimientos o **existencias** en alguna sucursal; un cliente, si tiene facturas, órdenes o transacciones; un proveedor, si tiene órdenes de compra o transacciones. Si una sucursal no responde, no se puede verificar y no se borra. La llave foránea del inventario en las sucursales borra en cascada, para que el borrado replicado no se atasque.
+
+## Concurrencia
+
+- **Control optimista en productos**: cada producto tiene una versión (`ValidFrom`); si dos personas lo editan, la segunda recibe el error 50080 (HTTP 409) y debe recargar. Nadie pisa el cambio del otro.
+- **IDs por paridad** en facturas (cada sucursal genera los suyos) y un único nodo (Corp) asignando los IDs de clientes y proveedores, siempre con bloqueo (`UPDLOCK, HOLDLOCK`): dos altas simultáneas no repiten ID.
+- **Escritura única del catálogo** (Corp) evita conflictos de replicación.
+- Las operaciones que guardan contacto (upsert en Corp) e inventario (upsert en la sucursal) usan `UPDLOCK, HOLDLOCK`.
+
+## Seguridad y encriptación
+
+- Contraseñas: `dbo.Users.password_enc` guarda el hash SHA2-256 de (sal + contraseña) **cifrado con AES-256** usando clave maestra → certificado → llave simétrica (`SK_Users`). Nunca se guarda en claro.
+- La API entrega un **token firmado (HMAC-SHA256)** con usuario, rol y sucursal. Cada ruta valida el token y el rol: el Corporativo solo usa estadísticas; un Administrador solo llega al nodo de su sucursal.
+- **Usuarios de base de datos por rol** (activado por defecto; `USAR_USUARIOS_BD=false` en el `.env` lo apaga y la API usa `sa`, solo para depurar): `app_admin` y `app_corp` solo pueden ejecutar procedimientos (`rol_administrador`, `rol_corporativo`) y no tienen permiso directo sobre las tablas. Se crean con `Script_sql/_all_06_Seguridad.sql` y `_corp_8_seguridad.sql`.
+- Los datos sensibles de clientes y proveedores solo se guardan en Corp.
+
+## Vistas materializadas (Corporativo)
+
+Corp mantiene `Consolidado.Invoices`, `InvoiceLines`, `PurchaseOrders`, `PurchaseOrderLines` y `StockItemHoldings` (copias de ambas sucursales con la columna `Sucursal`) y el resumen mensual `dbo.Estadisticas_Ventas`. `Api.usp_Estadisticas_Refrescar` las recalcula en dos fases (primero lee de ambas sucursales y solo si todo salió bien reemplaza el consolidado en una transacción local), así que si una sucursal no responde se conserva la última copia completa; la API lo hace sola si la copia tiene más de 5 minutos (`CONSOLIDADO_MINUTOS`) o con el botón de la pantalla de estadísticas. Los mismos reportes funcionan en cada sucursal (en vivo) y en Corp (consolidado) gracias a los sinónimos `Syn.*`.
+
+## Respuesta ante la falla de un nodo
+
+`GET /api/status` revisa los tres nodos. Si un nodo no responde, la API contesta HTTP 503 con un mensaje claro (no un error técnico) y descarta la conexión para reconectar sola cuando vuelva.
+
+| Si cae… | Qué sigue funcionando | Qué se afecta |
+|---|---|---|
+| **San José** | Limón y Corp completos. Corp muestra el consolidado con su última copia (marcado como desactualizado). | Los administradores de SJ reciben el aviso de nodo no disponible. |
+| **Limón** | Igual que arriba, con San José. | Los administradores de Limón reciben el aviso. |
+| **Corp** | Las sucursales siguen facturando, consultando clientes, proveedores y productos (copias locales) y manejando su inventario; sesiones ya iniciadas siguen vigentes. | No se crean ni editan productos, clientes ni proveedores, no se ven los datos de contacto, no se inicia sesión nueva y no hay estadísticas consolidadas. |
+
+Mientras una sucursal está caída, la replicación de productos le queda en cola en el distribuidor y se aplica sola al volver. Al regresar un nodo, basta volver a intentar: la API reconecta sin reiniciar.
+
+## Objetivos alcanzados.
+
+- 3 nodos SQL Server en Docker (San José, Limón y Corporativo) con la base WideWorldImporters.
+- Fragmentación horizontal de facturación y compras, fragmentación vertical de los datos sensibles y asignación a cada nodo.
+- Replicación transaccional del catálogo (productos, clientes y proveedores) Corp → San José y Limón.
+- Tabla de usuarios con contraseña cifrada con los servicios nativos de SQL Server (AES-256).
+- Estadísticas con filtro por sucursal o consolidadas, con copia materializada en Corp.
+- Control de concurrencia en el catálogo y en la generación de IDs.
+- Sistema web (HTML/JS) y API (Node.js/Express) que reutilizan la arquitectura del Proyecto 1.
+- Respuesta ante la caída de un nodo.
+
+## Objetivos no alcanzados.
+
+- Se alcanzaron el 100% de los objetivos del proyecto.
+
+## Pruebas
+
+Las pruebas se hacen en la demostración: (1) un cliente o proveedor creado por `admin_sj` aparece en `admin_limon` y su contacto sensible solo existe en Corp; (2) un producto creado desde la web llega a ambas sucursales; (3) las sucursales rechazan crear o borrar el catálogo directamente; (4) un producto con existencias o ventas no se puede borrar; (5) las estadísticas del Corporativo funcionan por sucursal y consolidadas; (6) al apagar un nodo, la API responde con un aviso claro. Durante el desarrollo se corrió además una batería automática de 99 comprobaciones, todas correctas.
+
+## Estructura del repositorio
+
+- `Script_sql/`: scripts de los nodos. Prefijos: `_all_` (los 3), `_corp_`, `_sj_`, `_limon_`.
+- `codigo/Api/`: API (Node.js/Express).
+- `codigo/WebSide/`: sitio web.
+- `docker/`: `docker-compose.yml` e `init-nodes.sh`.

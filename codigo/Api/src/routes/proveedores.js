@@ -6,29 +6,15 @@ function opcional(valor) {
   return valor === undefined || valor === null || valor === '' ? null : valor;
 }
 
-function agregarCampos(request, body) {
-  return request
-    .input('SupplierName', sql.NVarChar(100), req.body.nombre)
-    .input('SupplierReference', sql.NVarChar(20), req.body.referencia || null)
-    .input('SupplierCategoryID', sql.Int, req.body.categoria)
-    .input('DeliveryMethodID', sql.Int, req.body.metodo)
-    .input('PrimaryContactPersonID', sql.Int, req.body.contacto)
-    .input('AlternateContactPersonID', sql.Int, req.body.contactoAlterno)
-    .input('PaymentDays', sql.Int, req.body.diasPago)
-    .input('PhoneNumber', sql.NVarChar(20), req.body.telefono)
-    .input('FaxNumber', sql.NVarChar(20), req.body.fax)
-    .input('WebsiteURL', sql.NVarChar(256), req.body.sitioWeb)
-    .input('DeliveryAddressLine1', sql.NVarChar(60), req.body.direccionEntrega1)
-    .input('DeliveryAddressLine2', sql.NVarChar(60), req.body.direccionEntrega2 || null)
-    .input('DeliveryCityID', sql.Int, req.body.ciudad)
-    .input('DeliveryPostalCode', sql.NVarChar(10), req.body.codigoPostal)
-    .input('PostalAddressLine1', sql.NVarChar(60), req.body.direccionPostal1)
-    .input('PostalAddressLine2', sql.NVarChar(60), req.body.direccionPostal2 || null)
-    .input('Latitud', sql.Decimal(9, 6), req.body.latitud)
-    .input('Longitud', sql.Decimal(9, 6), req.body.longitud)
-    .input('BankAccountName', sql.NVarChar(50), req.body.nombreBanco || null)
-    .input('BankAccountNumber', sql.NVarChar(20), req.body.numeroCuenta || null)
+// Teléfono, direcciones y datos del banco se guardan solo en Corp
+async function leerContacto(id) {
+  const corp = await getConnection('corp');
+  const result = await corp.request()
+    .input('SupplierID', sql.Int, id)
+    .execute('Api.usp_ProveedoresContacto_Obtener');
+  return result.recordset[0] || {};
 }
+
 // GET /api/proveedores/categorias
 router.get('/proveedores/categorias', async (req, res) => {
   try {
@@ -65,9 +51,28 @@ router.get('/proveedores/:id', async (req, res) => {
       .execute('Api.usp_Proveedores_Detalle');
 
     if (result.recordset.length === 0) {
+      // Un proveedor recien creado en Corp tarda unos segundos en replicarse a la sucursal:
+      // mientras tanto se muestra desde Corp (su detalle ya incluye el contacto y el banco)
+      const corp = await getConnection('corp');
+      const enCorp = await corp.request()
+        .input('SupplierID', sql.Int, req.params.id)
+        .execute('Api.usp_Proveedores_Detalle');
+      if (enCorp.recordset.length > 0) {
+        return res.json({ ...enCorp.recordset[0], contactoDisponible: true });
+      }
+
       return res.status(404).json({ error: 'Proveedor no encontrado' });
     }
-    res.json(result.recordset[0]);
+
+    const proveedor = result.recordset[0];
+    // El contacto y el banco vienen de Corp; si Corp no responde se muestra el resto
+    try {
+      Object.assign(proveedor, await leerContacto(req.params.id));
+      proveedor.contactoDisponible = true;
+    } catch (error) {
+      proveedor.contactoDisponible = false;
+    }
+    res.json(proveedor);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -76,8 +81,9 @@ router.get('/proveedores/:id', async (req, res) => {
 // POST /api/proveedores - crear
 router.post('/proveedores', async (req, res) => {
   try {
-    const pool = await getConnection(req.nodo);
-    const request = pool.request()
+    // Los proveedores se crean, modifican y eliminan en Corp y se replican a las sucursales
+    const corp = await getConnection('corp');
+    const request = corp.request()
       .input('SupplierName', sql.NVarChar(100), req.body.nombre)
       .input('SupplierReference', sql.NVarChar(20), req.body.referencia || null)
       .input('SupplierCategoryID', sql.Int, req.body.categoria)
@@ -101,7 +107,9 @@ router.post('/proveedores', async (req, res) => {
       .output('NuevoSupplierID', sql.Int);
 
     const result = await request.execute('Api.usp_Proveedores_Crear');
-    res.status(201).json({ SupplierID: result.output.NuevoSupplierID });
+    const id = result.output.NuevoSupplierID;
+
+    res.status(201).json({ SupplierID: id });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -110,8 +118,8 @@ router.post('/proveedores', async (req, res) => {
 // PUT /api/proveedores/:id - modificar
 router.put('/proveedores/:id', async (req, res) => {
   try {
-    const pool = await getConnection(req.nodo);
-    await pool.request()
+    const corp = await getConnection('corp');
+    await corp.request()
       .input('SupplierID', sql.Int, req.params.id)
       .input('SupplierName', sql.NVarChar(100), req.body.nombre)
       .input('SupplierReference', sql.NVarChar(20), req.body.referencia || null)
@@ -134,6 +142,7 @@ router.put('/proveedores/:id', async (req, res) => {
       .input('BankAccountName', sql.NVarChar(50), req.body.nombreBanco || null)
       .input('BankAccountNumber', sql.NVarChar(20), req.body.numeroCuenta || null)
       .execute('Api.usp_Proveedores_Modificar');
+
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -143,8 +152,8 @@ router.put('/proveedores/:id', async (req, res) => {
 // DELETE /api/proveedores/:id - eliminar
 router.delete('/proveedores/:id', async (req, res) => {
   try {
-    const pool = await getConnection(req.nodo);
-    await pool.request()
+    const corp = await getConnection('corp');
+    await corp.request()
       .input('SupplierID', sql.Int, req.params.id)
       .execute('Api.usp_Proveedores_Eliminar');
     res.json({ ok: true });
